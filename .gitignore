@@ -5,3 +5,4 @@
 /mysensors.db
 /__pycache__
 /venv
+/assets/*
