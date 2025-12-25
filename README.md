@@ -42,11 +42,11 @@ Now you can just run the app
 ```sh
 venv/bin/python app.py
 ```
-This will start the built-in webserver on port 5000. 
+This will start the built-in webserver on port 5555. 
 
 The Flask people recommend not to use the built-in server for a production environment, but I decided it was good enough for my use at home. This has been running for >6 months now, without a glitch. logging messsages from ~20 MySensors nodes.
 
-Browse to http://*servername*:5000/nodes, and you should see the MySensorsTracker UI.
+Browse to http://*servername*:5555/nodes, and you should see the MySensorsTracker UI.
 
 Permanent Use
 -------------
