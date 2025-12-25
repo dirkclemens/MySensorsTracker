@@ -12,7 +12,6 @@
     * Bootstrapped Web UI
     * Diverse Verbesserungen
 
-
     This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
     If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/
 
@@ -28,21 +27,21 @@
     font-family: UltimaPro;
     font-style: normal;
     font-weight: 300;
-    src: url('/assets/UltimaProLt.woff') format('woff');
+    src: url('/static/UltimaProLt.woff') format('woff');
 }
 
 @font-face {
     font-family: UltimaPro;
     font-style: normal;
     font-weight: 400;
-    src: url('/assets/UltimaPro.woff') format('woff');
+    src: url('/static/UltimaPro.woff') format('woff');
 }
 
 @font-face {
     font-family: UltimaPro;
     font-style: normal;
     font-weight: 700;
-    src: url('/assets/UltimaProBlack.woff') format('woff');
+    src: url('/static/UltimaProBlack.woff') format('woff');
 }
 
 /* ===== Base Styles ===== */

@@ -244,7 +244,7 @@ Der folgende Prozess läuft automatisch ab:
 - Nur für ATmega328p optimiert
 - Watchdog-Probleme bei manchen Boards
 ```bash
-cd /Users/dirk/Projekte/python/MySensorsTracker
+cd /Users/$USER/Projekte/python/MySensorsTracker
 venv/bin/python app.py
 ```
 
