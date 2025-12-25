@@ -13,15 +13,15 @@ This is part of my home automation setup. For an overview, see my [blog](https:/
 
 Prerequisites
 -------------
-The app assumes that all MySensors messages are captured by an MQTT gateway, as described on the [MySensors website](https://www.mysensors.org/build/mqtt_gateway)
+The app assumes that all MySensors messages are captured by an ~~MQTT~~Ethernet gateway, as described on the [MySensors website](https://www.mysensors.org/build/ethernet_gateway)
 
-The app is written in Python 3. I have tested this both on my Microsoft Windows 10 development machine, and on a Debian 10 (Buster) Linux virtual server.
+The app is written in Python 3. I have tested this both on ~~my Microsoft Windows 10~~ macOS development machine, and on a Ubuntu Linux server.
 
 The app uses an Sqlite database.
 
-The app uses the [**Peewee**](http://docs.peewee-orm.com/en/latest/#) library  to access the database, the [**Flask**](https://palletsprojects.com/p/flask/) web framework, and the [**Eclipe Paho**](https://www.eclipse.org/paho/) MQTT library to listen to the MQTT messages published by the MySensors gateways.
+The app uses the [**Peewee**](http://docs.peewee-orm.com/en/latest/#) library  to access the database, the [**Flask**](https://palletsprojects.com/p/flask/) web framework ~~, and the [**Eclipe Paho**](https://www.eclipse.org/paho/) MQTT library to listen to the MQTT messages published by the MySensors gateways.~~
 
-On my virtual linux server that runs the app, I just did
+On a linux server that runs the app, I just did
 ```sh
 sudo apt-get install sqlite3
 sudo apt-get install python3 python3-venv python3-dev
@@ -47,12 +47,6 @@ This will start the built-in webserver on port 5000.
 The Flask people recommend not to use the built-in server for a production environment, but I decided it was good enough for my use at home. This has been running for >6 months now, without a glitch. logging messsages from ~20 MySensors nodes.
 
 Browse to http://*servername*:5000/nodes, and you should see the MySensorsTracker UI.
-
-Configuration 
--------------
-In the `main` function in `app.py`, you need to adjust the MQTT server name and topic to subscribe to. 
-
-In my home, the MQTT broker (mosquitto) runs on a server named `ha-server`, and the MySensors messages are received by two gateways, which then publish them via MQTT as `my/1/stat/...` and `my/2/stat/...`, respectively. Some MySensors nodes are in range for both gateways, so their messages are published *twice*, which is filtered out by the app, in function `on_message()`.
 
 Permanent Use
 -------------
