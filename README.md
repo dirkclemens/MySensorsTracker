@@ -1,3 +1,12 @@
+
+# Ergänzungen 2025 Dirk Clemens
+- OTA Firmware Management
+- Datenbank Bereinigung nach Aufbewahrungszeitraum
+- Bootstrapped Web UI
+- Diverse Verbesserungen
+
+
+---
 Tracker for MySensors messages
 ===========================================
 
