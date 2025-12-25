@@ -304,3 +304,20 @@ internal_names = {
     32: "I_PRE_SLEEP_NOTIFICATION",	# Message sent before node is going to sleep
     33: "I_POST_SLEEP_NOTIFICATION",	# Message sent after node woke up (if enabled)
 }
+
+class Stream(IntEnum):
+    ST_FIRMWARE_CONFIG_REQUEST = 0   #!< Request new FW, payload contains current FW details
+    ST_FIRMWARE_CONFIG_RESPONSE = 1  #!< New FW details to initiate OTA FW update
+    ST_FIRMWARE_REQUEST = 2          #!< Request FW block
+    ST_FIRMWARE_RESPONSE = 3         #!< Response FW block
+    ST_SOUND = 4                     #!< Sound
+    ST_IMAGE = 5                     #!< Image
+
+stream_names = {
+    0: "ST_FIRMWARE_CONFIG_REQUEST",   # Request new FW, payload contains current FW details
+    1: "ST_FIRMWARE_CONFIG_RESPONSE",  # New FW details to initiate OTA FW update
+    2: "ST_FIRMWARE_REQUEST",          # Request FW block
+    3: "ST_FIRMWARE_RESPONSE",         # Response FW block
+    4: "ST_SOUND",                     # Sound
+    5: "ST_IMAGE",                     # Image
+}

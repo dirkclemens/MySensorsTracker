@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}OTA Firmware{% endblock %}
+
+{% block header %}
+<h1><i class="bi bi-download"></i> Over-The-Air Firmware Updates</h1>
+{% endblock %}
+
+{% block content %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<h2><i class="bi bi-file-earmark-code"></i> Loaded Firmware</h2>
+<div class="table-responsive">
+<table class="table table-hover table-striped">
+    <thead class="table-dark">
+        <tr>
+            <th class="text-center">Type</th>
+            <th class="text-center">Version</th>
+            <th class="text-center">Blocks</th>
+            <th>CRC</th>
+            <th>Filename</th>
+            <th>Uploaded</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if firmware_list %}
+            {% for fw_type, fw_ver, blocks, crc, filename, uploaded in firmware_list %}
+            <tr>
+                <td class="text-center">{{ fw_type }}</td>
+                <td class="text-center">{{ fw_ver }}</td>
+                <td class="text-center">{{ blocks }}</td>
+                <td><code>{{ "%04X"|format(crc) }}</code></td>
+                <td>{{ filename }}</td>
+                <td>{{ uploaded.strftime('%Y-%m-%d %H:%M') if uploaded else '-' }}</td>
+                <td>
+                    <form action="/ota/delete/{{ fw_type }}/{{ fw_ver }}" method="post" class="d-inline" onsubmit="return confirm('Firmware {{ fw_type }}/{{ fw_ver }} wirklich löschen?');">
+                        <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> Löschen</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        {% else %}
+            <tr>
+                <td colspan="7" class="text-center text-muted">No firmware loaded</td>
+            </tr>
+        {% endif %}
+    </tbody>
+</table>
+</div>
+
+<h2 class="mt-4"><i class="bi bi-upload"></i> Upload New Firmware</h2>
+<div class="card mb-4">
+    <div class="card-body">
+        <form action="{{ url_for('ota_upload') }}" method="post" enctype="multipart/form-data">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label for="fw_type" class="form-label">Firmware Type:</label>
+                    <input type="number" class="form-control" name="fw_type" id="fw_type" value="1" min="0" max="65535" required>
+                </div>
+                <div class="col-md-3">
+                    <label for="fw_ver" class="form-label">Firmware Version:</label>
+                    <input type="number" class="form-control" name="fw_ver" id="fw_ver" value="1" min="0" max="65535" required>
+                </div>
+                <div class="col-md-6">
+                    <label for="fw_file" class="form-label">Firmware File (.hex):</label>
+                    <input type="file" class="form-control" name="fw_file" id="fw_file" accept=".hex" required>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Upload Firmware</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<h2><i class="bi bi-hdd-network"></i> Nodes - Schedule OTA Update</h2>
+<div class="table-responsive">
+<table class="table table-hover table-striped">
+    <thead class="table-dark">
+        <tr>
+            <th class="text-center">Node ID</th>
+            <th>Location</th>
+            <th>Sketch</th>
+            <th>Version</th>
+            <th>OTA Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for node in nodes %}
+        <tr>
+            <td class="text-center">{{ node.nid }}</td>
+            <td>{{ node.location or '' }}</td>
+            <td>{{ node.sk_name or '' }}</td>
+            <td>{{ node.sk_version or '' }}</td>
+            <td>
+                {% if node.nid in node_status %}
+                    {% set status = node_status[node.nid] %}
+                    <span class="badge bg-info">{{ status.status }}</span><br>
+                    <small>Type: {{ status.firmware[0] }}, Ver: {{ status.firmware[1] }}</small>
+                {% else %}
+                    <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+            <td>
+                <form action="{{ url_for('ota_update_node', nid=node.nid) }}" method="post" class="row g-2">
+                    <div class="col-auto">
+                        <select name="fw_type" class="form-select form-select-sm" required>
+                            <option value="">Select Type</option>
+                            {% for fw_type, fw_ver, blocks, crc, filename, uploaded in firmware_list %}
+                            <option value="{{ fw_type }}">Type {{ fw_type }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <select name="fw_ver" class="form-select form-select-sm" required>
+                            <option value="">Select Version</option>
+                            {% for fw_type, fw_ver, blocks, crc, filename, uploaded in firmware_list %}
+                            <option value="{{ fw_ver }}">Ver {{ fw_ver }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-arrow-down-circle"></i> Schedule Update</button>
+                    </div>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div class="card mt-4 mb-4">
+    <div class="card-header bg-info text-white">
+        <h5 class="mb-0"><i class="bi bi-info-circle"></i> OTA Update Process</h5>
+    </div>
+    <div class="card-body">
+        <ol>
+            <li><strong>Upload Firmware:</strong> Upload your compiled .hex firmware file with type and version numbers</li>
+            <li><strong>Schedule Update:</strong> Select a node and the firmware version to install</li>
+            <li><strong>Automatic Reboot:</strong> The node will automatically receive a reboot command on its next heartbeat</li>
+            <li><strong>Firmware Transfer:</strong> After reboot, the node requests the firmware and it will be transferred in blocks</li>
+            <li><strong>Verification:</strong> The node verifies the CRC and loads the new firmware</li>
+        </ol>
+        <p class="mb-0"><strong>Note:</strong> OTA updates require nodes with bootloader support (DualOptiboot or MYSBootloader)</p>
+    </div>
+</div>
+
+{% endblock %}
+

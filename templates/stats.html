@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}Database Statistics{% endblock %}
+
+{% block header %}
+<h1><i class="bi bi-bar-chart"></i> Database Statistics</h1>
+{% endblock %}
+
+{% block content %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="row">
+  <!-- Database Overview -->
+  <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-database"></i> Database Overview</h5>
+      </div>
+      <div class="card-body">
+        <table class="table table-sm">
+          <tr>
+            <td><strong>Database Size:</strong></td>
+            <td class="text-end">{{ "%.2f"|format(stats.db_size_mb) }} MB</td>
+          </tr>
+          <tr>
+            <td><strong>Total Nodes:</strong></td>
+            <td class="text-end">{{ "{:,}".format(stats.node_count) }}</td>
+          </tr>
+          <tr>
+            <td><strong>Total Sensors:</strong></td>
+            <td class="text-end">{{ "{:,}".format(stats.sensor_count) }}</td>
+          </tr>
+          <tr>
+            <td><strong>Firmware Files:</strong></td>
+            <td class="text-end">{{ "{:,}".format(stats.firmware_count) }}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Record Counts -->
+  <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-header bg-info text-white">
+        <h5 class="mb-0"><i class="bi bi-file-earmark-text"></i> Record Counts</h5>
+      </div>
+      <div class="card-body">
+        <table class="table table-sm">
+          <tr>
+            <td><strong>Messages:</strong></td>
+            <td class="text-end">{{ "{:,}".format(stats.message_count) }}</td>
+          </tr>
+          <tr>
+            <td><strong>Values:</strong></td>
+            <td class="text-end">{{ "{:,}".format(stats.value_count) }}</td>
+          </tr>
+          <tr>
+            <td colspan="2"><hr></td>
+          </tr>
+          <tr>
+            <td><strong>Total Records:</strong></td>
+            <td class="text-end"><strong>{{ "{:,}".format(stats.message_count + stats.value_count) }}</strong></td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <!-- Data Age -->
+  <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-header bg-success text-white">
+        <h5 class="mb-0"><i class="bi bi-calendar-range"></i> Data Age</h5>
+      </div>
+      <div class="card-body">
+        <table class="table table-sm">
+          <tr>
+            <td colspan="2"><strong>Messages:</strong></td>
+          </tr>
+          <tr>
+            <td>Oldest:</td>
+            <td class="text-end">
+              {% if stats.oldest_message %}
+                {{ stats.oldest_message.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td>Newest:</td>
+            <td class="text-end">
+              {% if stats.newest_message %}
+                {{ stats.newest_message.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2"><hr></td>
+          </tr>
+          <tr>
+            <td colspan="2"><strong>Values:</strong></td>
+          </tr>
+          <tr>
+            <td>Oldest:</td>
+            <td class="text-end">
+              {% if stats.oldest_value %}
+                {{ stats.oldest_value.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td>Newest:</td>
+            <td class="text-end">
+              {% if stats.newest_value %}
+                {{ stats.newest_value.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cleanup Policy -->
+  <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-header bg-warning">
+        <h5 class="mb-0"><i class="bi bi-trash"></i> Cleanup Policy</h5>
+      </div>
+      <div class="card-body">
+        <table class="table table-sm">
+          <tr>
+            <td><strong>Message Retention:</strong></td>
+            <td class="text-end">{{ stats.message_retention_days }} days</td>
+          </tr>
+          <tr>
+            <td><strong>Value Retention:</strong></td>
+            <td class="text-end">{{ stats.value_retention_days }} days</td>
+          </tr>
+          <tr>
+            <td><strong>Daily Cleanup:</strong></td>
+            <td class="text-end">{{ "%02d"|format(stats.cleanup_hour) }}:00</td>
+          </tr>
+          <tr>
+            <td colspan="2"><hr></td>
+          </tr>
+          <tr>
+            <td><strong>Messages to delete:</strong></td>
+            <td class="text-end text-danger">{{ "{:,}".format(stats.messages_to_delete) }}</td>
+          </tr>
+          <tr>
+            <td><strong>Values to delete:</strong></td>
+            <td class="text-end text-danger">{{ "{:,}".format(stats.values_to_delete) }}</td>
+          </tr>
+        </table>
+        
+        <form action="{{ url_for('stats_cleanup') }}" method="post" onsubmit="return confirm('Run cleanup now? This will delete old messages and values.');">
+          <button type="submit" class="btn btn-warning w-100 mt-2">
+            <i class="bi bi-trash"></i> Run Cleanup Now
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <!-- Admin Functions -->
+  <div class="col-md-6">
+    <div class="card border-secondary mb-3">
+      <div class="card-header bg-secondary text-white">
+        <h5 class="mb-0"><i class="bi bi-gear"></i> Admin Functions</h5>
+      </div>
+      <div class="card-body">
+        <h6>Node Presentation</h6>
+        <p class="small text-muted">Request all nodes to re-send their presentation information (sketch name, version, sensors, etc.)</p>
+        <form action="{{ url_for('nodes_discover') }}" method="post" onsubmit="return confirm('Send I_PRESENTATION request to all nodes?');">
+          <button type="submit" class="btn btn-secondary w-100 mb-3">
+            <i class="bi bi-broadcast"></i> Request Presentation (I_PRESENTATION)
+          </button>
+        </form>
+        
+        <h6>Node Discovery</h6>
+        <p class="small text-muted">Trigger discovery protocol to find nodes and update routing information</p>
+        <form action="{{ url_for('nodes_discover_request') }}" method="post" onsubmit="return confirm('Send I_DISCOVER_REQUEST to all nodes?');">
+          <button type="submit" class="btn btn-secondary w-100">
+            <i class="bi bi-search"></i> Discover Nodes (I_DISCOVER_REQUEST)
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Information -->
+  <div class="col-md-6">
+    <div class="card border-info mb-3">
+      <div class="card-header bg-info text-white">
+        <h5 class="mb-0"><i class="bi bi-info-circle"></i> Information</h5>
+      </div>
+      <div class="card-body">
+        <p class="mb-2">
+          <strong>Automatic Cleanup:</strong> The system automatically deletes old data every day at {{ "%02d"|format(stats.cleanup_hour) }}:00 to prevent database growth.
+        </p>
+        <ul class="mb-0">
+          <li>Messages older than {{ stats.message_retention_days }} days are deleted</li>
+          <li>Values older than {{ stats.value_retention_days }} days are deleted</li>
+          <li>After deletion, the database is vacuumed to reclaim disk space</li>
+          <li>You can manually trigger cleanup anytime using the button above</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -15,31 +15,40 @@
 
 {% block title %}Confirm new battery{% endblock %}
 
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-<ul>
-    {% for message in messages %}
- 	<li>{ { message[1] }}</li>
-{% endfor %}</ul>
-{% endif %}
-{% endwith %}
+{% block header %}
+  <h1><i class="bi bi-battery-charging"></i> New Battery</h1>
+{% endblock %}
 
 {% block content %}
-<h2>New battery</h2>
-<form action="" method="post">
-<div class="input">
-    <table class="edit-table">
-        <tr>
-            <td style="text-align: right;">{{ form.f_nid.label }}</td>
-            <td>{{ form.f_nid }}</td>
-        </tr>
-        <tr>
-            <td style="text-align: right;">{{ form.f_bat.label }}</td>
-            <td>{{ form.f_bat }}</td>
-        </tr>
-    </table>
-     
-    <input type="submit" class="input submit modal-button" value="Confirm !" />
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="card" style="max-width: 40rem;">
+  <div class="card-header bg-success text-white">
+    <h5 class="mb-0">Record Battery Replacement</h5>
+  </div>
+  <div class="card-body">
+    <form action="" method="post">
+      <div class="mb-3">
+        {{ form.f_nid.label(class="form-label") }}
+        {{ form.f_nid(class="form-control", readonly=true) }}
+      </div>
+      <div class="mb-3">
+        {{ form.f_bat.label(class="form-label") }}
+        {{ form.f_bat(class="form-control") }}
+      </div>
+      <button type="submit" class="btn btn-success"><i class="bi bi-check-circle"></i> Confirm!</button>
+      <a href="{{ url_for('nodes') }}" class="btn btn-secondary"><i class="bi bi-x-circle"></i> Cancel</a>
+    </form>
+  </div>
 </div>
-</form>
 {% endblock %}

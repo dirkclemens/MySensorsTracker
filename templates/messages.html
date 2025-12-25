@@ -29,46 +29,69 @@
 
 {% block content %}
 {{ pagecontrols(nid=nid, cid=cid, usid=usid) }}
-<table >
-  <tr">
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='nid') }}">Node</a></th>
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='cid') }}">Sensor</a></th>
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='cmd') }}">Cmd</a></th>
+<div class="table-responsive">
+<table class="table table-hover table-sm">
+  <thead class="table-dark">
+  <tr>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='nid') }}" class="text-white text-decoration-none">Node</a></th>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='cid') }}" class="text-white text-decoration-none">Sensor</a></th>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='cmd') }}" class="text-white text-decoration-none">Cmd</a></th>
    <th>(symbol)</th>
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='typ') }}">Type</a></th>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='typ') }}" class="text-white text-decoration-none">Type</a></th>
    <th>(symbol)</th>
-   <th >Payload</th>
-   <th class="th-datetime"><a href="{{ url_for(request.endpoint,sort='date') }}">Received</a></th>
+   <th>Payload</th>
+   <th><a href="{{ url_for(request.endpoint,sort='date') }}" class="text-white text-decoration-none">Received</a></th>
   </tr>
+  </thead>
+  <tbody>
   {% for entry in object_list %}
     <tr>
-      <td class="td-id">
+      <td class="text-center">
         <div class="dropdown">
-          <a class="dropbtn">{{ entry.nid }}</a>
-          <div class="dropdown-content">
-            <a href="{{ url_for(request.endpoint, nid = entry.nid) }}">show only this node</a>
-            <a href="{{ url_for(request.endpoint) }}">show all nodes</a>
-            <a href="{{ url_for('confirm_delete_old', ndays = 365) }}">delete old nodes</a>
-          </div>
+          <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown"
+                  data-bs-toggle="tooltip" data-bs-placement="top" 
+                  title="{{ entry.nid.sk_name or 'Unknown' }}{% if entry.nid.location %} - {{ entry.nid.location }}{% endif %}">
+            {{ entry.nid.nid }}
+          </button>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint, nid = entry.nid.nid) }}">Show only this node</a></li>
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all nodes</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-danger" href="{{ url_for('confirm_delete_old', ndays = 365) }}">Delete old nodes</a></li>
+          </ul>
         </div>
       </td>
-      <td class="td-id">
+      <td class="text-center">
         <div class="dropdown">
-          <a class="dropbtn">{{ entry.cid }}</a>
-          <div class="dropdown-content">
-            <a href="{{ url_for(request.endpoint, cid = entry.cid) }}">show only this sensor type</a>
-            <a href="{{ url_for(request.endpoint) }}">show all</a>
-          </div>
+          <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">{{ entry.cid }}</button>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint, cid = entry.cid) }}">Show only this sensor type</a></li>
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all</a></li>
+          </ul>
         </div>
       </td>
-      <td class="td-id">{{ entry.cmd }}</td>
-      <td class="td-symbol">{{ command_string(entry.cmd) }}</td>
-      <td class="td-id">{{ entry.typ }}</td>
-      <td class="td-symbol">{{ type_string(entry.cmd, entry.typ) }}</td>
+      <td class="text-center">{{ entry.cmd }}</td>
+      <td><code>{{ command_string(entry.cmd) }}</code></td>
+      <td class="text-center">{{ entry.typ }}</td>
+      <td><code>{{ type_string(entry.cmd, entry.typ) }}</code></td>
       {{ td_or_none(entry.payload) }}
-      <td class="td-datetime">{{ entry.received.strftime('%d.%m.%Y %H:%M:%S') }}</td>
+      <td><small>{{ entry.received.strftime('%d.%m.%Y %H:%M:%S') }}</small></td>
     </tr>
   {% endfor %}
+  </tbody>
 </table>
+</div>
 {{ pagecontrols(nid=nid, cid=cid, usid=usid) }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize all tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
 {% endblock %}

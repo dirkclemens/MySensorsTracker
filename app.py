@@ -15,23 +15,34 @@
 #
 #   SPDX-License-Identifier: MPL-2.0
 #
-
+#   Ergänzungen 2025 Dirk Clemens
+#   * OTA Firmware Management
+#   * Datenbank Bereinigung nach Aufbewahrungszeitraum
+#   * Bootstrapped Web UI
+#   * Diverse Verbesserungen
+#
+#   Start this app with:
+#       venv/bin/python app.py
+#   Stop this app with Ctrl-C or
+#       kill -9 $(lsof -ti:5555)
+#   
 # adjust these constants to your environment
-# in the author's setup, the topic is 'my/N/stat/...' where N is number of the gateway
 
-MQTT_BROKER = "ha-server"               # the name of your MQTT broker
-MQTT_TOPIC = "my/+/stat/#"              # the topic to subscribe to, includes wildcards
-MQTT_PATTERN = r'my\/\w+\/stat\/(.+)'   # regular expression to extract the interesting part of topic
+WEB_PORT = 5555                        # port for web server
+GATEWAY_HOST = "192.168.2.211"          # MySensors Gateway IP address
+GATEWAY_PORT = 5003                     # MySensors Gateway TCP port
 DATABASE_FILE = 'mysensors.db'
 DB_DIR = '/var/lib/mytracker/'
 REVISION = '$Id: app.py 1685 2024-11-27 11:19:02Z  $'
 
 import sys,re,time,os
 import math, json
+import socket
+import threading
 import logging
 import logging.config
+import schedule
 from datetime import datetime,timedelta
-import paho.mqtt.client as mqtt         # EPL 1.0 or EDPL 1.0
 from peewee import *                    # MIT license
 import flask                            # BSD license
 from flask import Flask,render_template,request,url_for,redirect
@@ -43,6 +54,7 @@ from playhouse.reflection import Introspector
 import wtforms as wtf                   # BSD license
 
 import mysensors
+import ota_firmware
 
 ##############################################################################
 #region Logging
@@ -95,10 +107,18 @@ if not os.path.isdir(DB_DIR):
 DATABASE_URI = 'sqlite:///%s' % os.path.join(DB_DIR, DATABASE_FILE)
 applog.info('Using database at '+DB_DIR)
 
+# Retention Policy Configuration
+MESSAGE_RETENTION_DAYS = 30   # Delete messages older than 30 days
+VALUE_RETENTION_DAYS = 365    # Delete values older than 1 year
+CLEANUP_HOUR = 3              # Run cleanup daily at 3 AM
+
 app = Flask(__name__)
 app.config['FLASK_ENV'] = 'development'
 app.config['DEBUG'] = True
 app.config['TESTING'] = True
+#app.secret_key = 'mysensors-tracker-secret-key-change-in-production'  # Für Flask Sessions (flash messages)
+import secrets
+app.secret_key = secrets.token_hex(32) 
 
 ##############################################################################
 #region Model helpers
@@ -214,6 +234,22 @@ class Message(BaseModel):
         return self.received.to_timestamp()
         
 
+class Firmware(BaseModel):
+    """Table for storing OTA firmware files."""
+    fw_type     = IntegerField(help_text="Firmware type")
+    fw_ver      = IntegerField(help_text="Firmware version")
+    blocks      = IntegerField(help_text="Number of blocks")
+    crc         = IntegerField(help_text="CRC16 checksum")
+    filename    = CharField(max_length=255, help_text="Original filename")
+    hex_data    = TextField(help_text="Intel HEX file content")
+    uploaded    = DateTimeField(default=datetime.now, help_text="Upload timestamp")
+    
+    class Meta:
+        indexes = (
+            (('fw_type', 'fw_ver'), True),  # Unique constraint on type+version
+        )
+
+
 #endregion
 ##############################################################################
 #region Model access
@@ -244,6 +280,59 @@ def add_or_select_sensor(nid,cid):
         defaults={'nid':nid, 'cid':cid}
         )
     return sensor
+
+##----------------------------------------------------------------------------
+
+def cleanup_old_data():
+    """Delete old messages and values based on retention policy.
+    
+    Returns:
+        dict: Statistics about deleted records
+    """
+    from datetime import datetime, timedelta
+    
+    stats = {
+        'messages_deleted': 0,
+        'values_deleted': 0,
+        'db_size_before': 0,
+        'db_size_after': 0,
+        'timestamp': datetime.now()
+    }
+    
+    try:
+        # Get DB file size before cleanup
+        db_path = os.path.join(DB_DIR, DATABASE_FILE)
+        if os.path.exists(db_path):
+            stats['db_size_before'] = os.path.getsize(db_path)
+        
+        # Calculate cutoff dates
+        message_cutoff = datetime.now() - timedelta(days=MESSAGE_RETENTION_DAYS)
+        value_cutoff = datetime.now() - timedelta(days=VALUE_RETENTION_DAYS)
+        
+        # Delete old messages
+        messages_query = Message.delete().where(Message.received < message_cutoff)
+        stats['messages_deleted'] = messages_query.execute()
+        applog.info(f"Deleted {stats['messages_deleted']} messages older than {MESSAGE_RETENTION_DAYS} days")
+        
+        # Delete old values
+        values_query = ValueType.delete().where(ValueType.received < value_cutoff)
+        stats['values_deleted'] = values_query.execute()
+        applog.info(f"Deleted {stats['values_deleted']} values older than {VALUE_RETENTION_DAYS} days")
+        
+        # VACUUM database to reclaim space
+        db.execute_sql('VACUUM')
+        applog.info("Database VACUUM completed")
+        
+        # Get DB file size after cleanup
+        if os.path.exists(db_path):
+            stats['db_size_after'] = os.path.getsize(db_path)
+            freed_mb = (stats['db_size_before'] - stats['db_size_after']) / (1024 * 1024)
+            applog.info(f"Freed {freed_mb:.2f} MB of disk space")
+        
+    except Exception as e:
+        applog.error(f"Error during cleanup: {e}")
+        
+    return stats
 
 ##----------------------------------------------------------------------------
         
@@ -377,7 +466,7 @@ def delete_old_stuff( ndays ):
 
 #endregion
 ##############################################################################
-#region MQTT message handling
+#region message handling
       
 def add_message( nid,cid,cmd,typ,pay ):
     """ add a record to 'messages' table
@@ -568,56 +657,67 @@ def on_node_presentation_message( nid, typ, val ):
 
 ##----------------------------------------------------------------------------
 
-last_topic = ""
-last_payload = ""
+last_message = ""
 last_time = time.time()
+gateway_socket = None
+gateway_running = False
+ota_manager = None  # OTA Firmware Manager
 
-def on_message(mqttc, userdata, msg):
-    """MQTT callback function
+def process_gateway_message(line):
+    """Process a message from MySensors Gateway
     Args:
-        mqttc (mqtt.Client): client object
-        userdata (n/a): n/a
-        msg (MQTTMessage): topic and payload
+        line (str): MySensors message in format: node-id;child-sensor-id;command;ack;type;payload
     """
-    # example   my/3/stat/106/61/1/0/23 37
-    global last_topic, last_payload, last_time, applog
-    try:    
-        payload = msg.payload.decode("utf-8")
+    # example: 106;61;1;0;23;37
+    global last_message, last_time, applog
+    try:
+        line = line.strip()
+        if not line:
+            return
+            
         now = time.time()
-        m = re.search(MQTT_PATTERN,msg.topic)
-        if m is None:
-            return
-
-        topic = m.group(1)
-        path = topic.split('/')
-        if (len(path) < 5):
-            return
-
+        
         # remove duplicates
-        isnew = (last_topic != topic) or (last_payload != payload) or ((now - last_time) > 1)
-        last_topic = topic
-        last_payload = payload
+        isnew = (last_message != line) or ((now - last_time) > 1)
+        last_message = line
         last_time = now
-        if not isnew: return
+        if not isnew:
+            return
 
-        nid = int(path[0])
-        cid = int(path[1])
-        cmd = int(path[2])
-        typ = int(path[4])
-        val = msg.payload.decode("utf-8")
-        applog.debug("message nid:%d cid:%d cmd:%d typ:%d = '%s'",nid,cid,cmd,typ,val)
-        add_message(nid,cid,cmd,typ,val)
+        parts = line.split(';')
+        if len(parts) < 6:
+            applog.warning("Invalid message format: %s", line)
+            return
 
-        if (cmd==mysensors.Commands.C_SET and cid!=255):
-            on_value_message(nid,cid,typ,val)
-        elif (cmd==mysensors.Commands.C_SET and cid==255):
-            on_node_value_message(nid,typ,val)
-        elif (cmd==mysensors.Commands.C_PRESENTATION and cid!=255):
-            on_presentation_message(nid,cid,typ,val)
-        elif (cmd==mysensors.Commands.C_PRESENTATION and cid==255):
-            on_node_presentation_message(nid,typ,val)
-        elif (cmd==mysensors.Commands.C_INTERNAL):
-            on_internal_message(nid,cid,typ,val)
+        nid = int(parts[0])
+        cid = int(parts[1])
+        cmd = int(parts[2])
+        ack = int(parts[3])
+        typ = int(parts[4])
+        val = parts[5] if len(parts) > 5 else ""
+        
+        applog.debug("message nid:%d cid:%d cmd:%d typ:%d = '%s'", nid, cid, cmd, typ, val)
+        add_message(nid, cid, cmd, typ, val)
+
+        # Handle OTA firmware updates (C_STREAM messages)
+        if cmd == mysensors.Commands.C_STREAM:
+            response = handle_stream_message(nid, cid, typ, val)
+            if response:
+                send_message_to_gateway(response)
+        elif (cmd == mysensors.Commands.C_SET and cid != 255):
+            on_value_message(nid, cid, typ, val)
+        elif (cmd == mysensors.Commands.C_SET and cid == 255):
+            on_node_value_message(nid, typ, val)
+        elif (cmd == mysensors.Commands.C_PRESENTATION and cid != 255):
+            on_presentation_message(nid, cid, typ, val)
+        elif (cmd == mysensors.Commands.C_PRESENTATION and cid == 255):
+            on_node_presentation_message(nid, typ, val)
+        elif (cmd == mysensors.Commands.C_INTERNAL):
+            on_internal_message(nid, cid, typ, val)
+            # Check if node needs reboot for OTA
+            if typ == mysensors.Internal.I_HEARTBEAT_RESPONSE or typ == mysensors.Internal.I_POST_SLEEP_NOTIFICATION:
+                if ota_manager and ota_manager.is_reboot_required(nid):
+                    send_reboot_request(nid)
     except Exception as err:
         print("Error: " + str(err))
         sys.exit(1)
@@ -684,7 +784,7 @@ def sensors():
 @app.route('/tvalues')
 def tvalues():
     # get parameters
-    sort = flask.request.args.get('sort', default="usid", type=str)
+    sort = flask.request.args.get('sort', default="date", type=str)
     nid = flask.request.args.get('nid', default=None, type=str)
     cid = flask.request.args.get('cid', default=None, type=str)
     usid = flask.request.args.get('usid', default=None, type=str)
@@ -722,12 +822,17 @@ def tvalues():
 @app.route('/values')
 def values():
     # get parameters
-    sort = flask.request.args.get('sort', default="usid", type=str)
+    sort = flask.request.args.get('sort', default="date", type=str)
     nid = flask.request.args.get('nid', default=None, type=str)
     cid = flask.request.args.get('cid', default=None, type=str)
     usid = flask.request.args.get('usid', default=None, type=str)
 
-    query = Message.select().where(Message.cmd==mysensors.Commands.C_SET)
+    # Join Node and Sensor to get location and sensor type
+    query = Message.select(Message, Node, Sensor).join(Node).switch(Message).join(
+        Sensor,
+        JOIN.LEFT_OUTER,
+        on=((Message.nid == Sensor.nid) & (Message.cid == Sensor.cid))
+    ).where(Message.cmd==mysensors.Commands.C_SET)
 
     # sort as requested
     if sort=="cid": 
@@ -761,22 +866,22 @@ def values():
 @app.route('/messages')
 def messages():
     # get parameters
-    sort = flask.request.args.get('sort', default="usid", type=str)
+    sort = flask.request.args.get('sort', default="date", type=str)
     cid = flask.request.args.get('cid', default=None, type=str)
     nid = flask.request.args.get('nid', default=None, type=str)
     usid = flask.request.args.get('usid', default=None, type=str)
 
     # sort as requested
     if sort=='nid':
-        query = Message.select().order_by(Message.nid)
+        query = Message.select(Message, Node).join(Node).order_by(Message.nid)
     elif sort=="cid": 
-        query = Message.select().order_by(Message.cid)
+        query = Message.select(Message, Node).join(Node).order_by(Message.cid)
     elif sort=="cmd":
-        query = Message.select().order_by(Message.cmd)
+        query = Message.select(Message, Node).join(Node).order_by(Message.cmd)
     elif sort=='typ':
-        query = Message.select().order_by(Message.typ)
+        query = Message.select(Message, Node).join(Node).order_by(Message.typ)
     else: 
-        query = Message.select().order_by(Message.received.desc())
+        query = Message.select(Message, Node).join(Node).order_by(Message.received.desc())
 
     # filter if requested
     if usid is not None and len(usid)>0:
@@ -812,6 +917,303 @@ def battery_today():
         print("GET: ")
         print (request )
     return redirect(url_for('batteries'))
+
+##----------------------------------------------------------------------------
+
+@app.route('/ota')
+def ota_index():
+    """Display OTA firmware management page."""
+    # Get firmware list from database with additional info
+    firmware_list = []
+    for fw in Firmware.select().order_by(Firmware.uploaded.desc()):
+        firmware_list.append((fw.fw_type, fw.fw_ver, fw.blocks, fw.crc, fw.filename, fw.uploaded))
+    
+    nodes = Node.select().order_by(Node.nid)
+    
+    # Get OTA status for each node
+    node_status = {}
+    if ota_manager:
+        for node in nodes:
+            status = ota_manager.get_node_status(node.nid)
+            if status:
+                fw_id = (ota_manager.requested_nodes.get(node.nid) or 
+                        ota_manager.unstarted_nodes.get(node.nid) or 
+                        ota_manager.started_nodes.get(node.nid))
+                node_status[node.nid] = {'status': status, 'firmware': fw_id}
+    
+    return render_template('ota.html', 
+                          firmware_list=firmware_list, 
+                          nodes=nodes,
+                          node_status=node_status)
+
+
+@app.route('/ota/upload', methods=['POST'])
+def ota_upload():
+    """Upload and register a new firmware."""
+    global ota_manager
+    
+    if not ota_manager:
+        flask.flash("OTA Manager not initialized", "error")
+        return redirect('/ota')
+    
+    try:
+        fw_type = int(request.form.get('fw_type', 0))
+        fw_ver = int(request.form.get('fw_ver', 0))
+        fw_file = request.files.get('fw_file')
+        
+        if not fw_file or fw_file.filename == '':
+            flask.flash("No firmware file selected", "error")
+            return redirect('/ota')
+        
+        # Save temporarily and read hex content
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.hex', delete=False) as tmp:
+            fw_file.save(tmp.name)
+            tmp_path = tmp.name
+        
+        # Read hex file content for database storage
+        with open(tmp_path, 'r') as f:
+            hex_content = f.read()
+        
+        # Load firmware into OTA manager
+        if ota_manager.load_firmware(fw_type, fw_ver, tmp_path):
+            # Get firmware info from OTA manager
+            fw_list = ota_manager.get_firmware_list()
+            fw_info = next((f for f in fw_list if f[0] == fw_type and f[1] == fw_ver), None)
+            
+            if fw_info:
+                blocks, crc = fw_info[2], fw_info[3]
+                
+                # Save to database (update or insert)
+                try:
+                    existing = Firmware.get((Firmware.fw_type == fw_type) & (Firmware.fw_ver == fw_ver))
+                    existing.blocks = blocks
+                    existing.crc = crc
+                    existing.filename = fw_file.filename
+                    existing.hex_data = hex_content
+                    existing.uploaded = datetime.now()
+                    existing.save()
+                    applog.info("Updated firmware in DB: type %d version %d", fw_type, fw_ver)
+                except Firmware.DoesNotExist:
+                    Firmware.create(
+                        fw_type=fw_type,
+                        fw_ver=fw_ver,
+                        blocks=blocks,
+                        crc=crc,
+                        filename=fw_file.filename,
+                        hex_data=hex_content
+                    )
+                    applog.info("Saved new firmware to DB: type %d version %d", fw_type, fw_ver)
+                
+                flask.flash(f"Firmware type {fw_type} version {fw_ver} loaded and saved successfully", "success")
+            else:
+                flask.flash("Firmware loaded but info not available", "warning")
+        else:
+            flask.flash("Failed to load firmware", "error")
+        
+        # Cleanup
+        os.unlink(tmp_path)
+        
+    except Exception as e:
+        flask.flash(f"Error uploading firmware: {str(e)}", "error")
+    
+    return redirect('/ota')
+
+
+@app.route('/ota/delete/<int:fw_type>/<int:fw_ver>', methods=['POST'])
+def ota_delete(fw_type, fw_ver):
+    """Delete a firmware from the database and OTA manager."""
+    try:
+        # Remove from OTA manager
+        if ota_manager:
+            ota_manager.delete_firmware(fw_type, fw_ver)
+        
+        # Remove from database
+        fw = Firmware.get((Firmware.fw_type == fw_type) & (Firmware.fw_ver == fw_ver))
+        fw.delete_instance()
+        
+        flash(f'Firmware {fw_type}/{fw_ver} wurde gelöscht', 'success')
+    except Firmware.DoesNotExist:
+        flash(f'Firmware {fw_type}/{fw_ver} nicht gefunden', 'error')
+    except Exception as e:
+        flash(f'Fehler beim Löschen der Firmware: {str(e)}', 'error')
+    
+    return redirect('/ota')
+
+
+@app.route('/stats')
+def stats():
+    """Display database statistics and cleanup information."""
+    from datetime import datetime, timedelta
+    
+    stats = {}
+    
+    try:
+        # Database file information
+        db_path = os.path.join(DB_DIR, DATABASE_FILE)
+        if os.path.exists(db_path):
+            stats['db_size'] = os.path.getsize(db_path)
+            stats['db_size_mb'] = stats['db_size'] / (1024 * 1024)
+        else:
+            stats['db_size'] = 0
+            stats['db_size_mb'] = 0
+        
+        # Record counts
+        stats['message_count'] = Message.select().count()
+        stats['value_count'] = ValueType.select().count()
+        stats['node_count'] = Node.select().count()
+        stats['sensor_count'] = Sensor.select().count()
+        stats['firmware_count'] = Firmware.select().count()
+        
+        # Oldest and newest records
+        oldest_message = Message.select().order_by(Message.received.asc()).first()
+        newest_message = Message.select().order_by(Message.received.desc()).first()
+        stats['oldest_message'] = oldest_message.received if oldest_message else None
+        stats['newest_message'] = newest_message.received if newest_message else None
+        
+        oldest_value = ValueType.select().order_by(ValueType.received.asc()).first()
+        newest_value = ValueType.select().order_by(ValueType.received.desc()).first()
+        stats['oldest_value'] = oldest_value.received if oldest_value else None
+        stats['newest_value'] = newest_value.received if newest_value else None
+        
+        # Calculate what would be deleted
+        message_cutoff = datetime.now() - timedelta(days=MESSAGE_RETENTION_DAYS)
+        value_cutoff = datetime.now() - timedelta(days=VALUE_RETENTION_DAYS)
+        
+        stats['messages_to_delete'] = Message.select().where(Message.received < message_cutoff).count()
+        stats['values_to_delete'] = ValueType.select().where(ValueType.received < value_cutoff).count()
+        
+        # Retention policy settings
+        stats['message_retention_days'] = MESSAGE_RETENTION_DAYS
+        stats['value_retention_days'] = VALUE_RETENTION_DAYS
+        stats['cleanup_hour'] = CLEANUP_HOUR
+        
+    except Exception as e:
+        applog.error(f"Error gathering statistics: {e}")
+        flask.flash(f"Error: {str(e)}", "error")
+    
+    return render_template('stats.html', stats=stats)
+
+
+@app.route('/stats/cleanup', methods=['POST'])
+def stats_cleanup():
+    """Manually trigger database cleanup."""
+    try:
+        result = cleanup_old_data()
+        flask.flash(f"Cleanup completed: {result['messages_deleted']} messages and {result['values_deleted']} values deleted", "success")
+    except Exception as e:
+        flask.flash(f"Cleanup failed: {str(e)}", "error")
+    
+    return redirect(url_for('stats'))
+
+
+@app.route('/nodes/discover', methods=['POST'])
+def nodes_discover():
+    """Send I_PRESENTATION request to all nodes to refresh presentation data."""
+    try:
+        # Broadcast I_PRESENTATION request to all nodes (node 255)
+        # Format: node_id;child_id;command;ack;type;payload
+        # Command: C_INTERNAL (3), Type: I_PRESENTATION (19)
+        message = f"255;255;{mysensors.Commands.C_INTERNAL};0;{mysensors.Internal.I_PRESENTATION};"
+        send_message_to_gateway(message)
+        applog.info("Sent I_PRESENTATION request to all nodes")
+        flask.flash("Discovery request sent to all nodes. They should re-send their presentation data.", "success")
+    except Exception as e:
+        applog.error(f"Error sending discovery request: {e}")
+        flask.flash(f"Failed to send discovery request: {str(e)}", "error")
+    
+    return redirect(request.referrer or url_for('nodes'))
+
+
+@app.route('/nodes/discover-request', methods=['POST'])
+def nodes_discover_request():
+    """Send I_DISCOVER_REQUEST to all nodes to trigger discovery protocol."""
+    try:
+        # Broadcast I_DISCOVER_REQUEST to all nodes (node 255)
+        # Format: node_id;child_id;command;ack;type;payload
+        # Command: C_INTERNAL (3), Type: I_DISCOVER_REQUEST (21)
+        message = f"255;255;{mysensors.Commands.C_INTERNAL};0;{mysensors.Internal.I_DISCOVER_REQUEST};"
+        send_message_to_gateway(message)
+        applog.info("Sent I_DISCOVER_REQUEST to all nodes")
+        flask.flash("I_DISCOVER_REQUEST sent to all nodes. They should respond with their node information.", "success")
+    except Exception as e:
+        applog.error(f"Error sending discover request: {e}")
+        flask.flash(f"Failed to send discover request: {str(e)}", "error")
+    
+    return redirect(request.referrer or url_for('nodes'))
+
+
+@app.route('/nodes/<int:nid>/presentation', methods=['POST'])
+def node_presentation(nid):
+    """Send I_PRESENTATION request to a specific node."""
+    try:
+        # Send I_PRESENTATION request to specific node
+        # Format: node_id;child_id;command;ack;type;payload
+        # Command: C_INTERNAL (3), Type: I_PRESENTATION (19)
+        message = f"{nid};255;{mysensors.Commands.C_INTERNAL};0;{mysensors.Internal.I_PRESENTATION};"
+        send_message_to_gateway(message)
+        applog.info(f"Sent I_PRESENTATION request to node {nid}")
+        flask.flash(f"Presentation request sent to node {nid}.", "success")
+    except Exception as e:
+        applog.error(f"Error sending presentation request to node {nid}: {e}")
+        flask.flash(f"Failed to send presentation request: {str(e)}", "error")
+    
+    return redirect(request.referrer or url_for('nodes'))
+
+
+@app.route('/nodes/<int:nid>/discover', methods=['POST'])
+def node_discover(nid):
+    """Send I_DISCOVER_REQUEST to a specific node."""
+    try:
+        # Send I_DISCOVER_REQUEST to specific node
+        # Format: node_id;child_id;command;ack;type;payload
+        # Command: C_INTERNAL (3), Type: I_DISCOVER_REQUEST (21)
+        message = f"{nid};255;{mysensors.Commands.C_INTERNAL};0;{mysensors.Internal.I_DISCOVER_REQUEST};"
+        send_message_to_gateway(message)
+        applog.info(f"Sent I_DISCOVER_REQUEST to node {nid}")
+        flask.flash(f"Discovery request sent to node {nid}.", "success")
+    except Exception as e:
+        applog.error(f"Error sending discover request to node {nid}: {e}")
+        flask.flash(f"Failed to send discover request: {str(e)}", "error")
+    
+    return redirect(request.referrer or url_for('nodes'))
+
+
+@app.route('/ota/update/<int:nid>', methods=['POST'])
+def ota_update_node(nid):
+    """Request firmware update for a specific node."""
+    global ota_manager
+    
+    if not ota_manager:
+        flask.flash("OTA Manager not initialized", "error")
+        return redirect('/ota')
+    
+    try:
+        fw_type = int(request.form.get('fw_type'))
+        fw_ver = int(request.form.get('fw_ver'))
+        
+        if ota_manager.request_update(nid, fw_type, fw_ver):
+            flask.flash(f"Node {nid} scheduled for firmware type {fw_type} version {fw_ver}", "success")
+        else:
+            flask.flash(f"Failed to schedule node {nid} for update", "error")
+            
+    except Exception as e:
+        flask.flash(f"Error scheduling update: {str(e)}", "error")
+    
+    return redirect('/ota')
+
+
+@app.route('/nodes/<int:nid>/reboot', methods=['POST'])
+def reboot_node(nid):
+    """Send reboot command to a node."""
+    try:
+        send_reboot_request(nid)
+        flask.flash(f"Reboot command sent to node {nid}", "success")
+    except Exception as e:
+        flask.flash(f"Error sending reboot to node {nid}: {str(e)}", "error")
+    
+    return redirect(url_for('nodes'))
+
 
 #endregion
 ##############################################################################
@@ -907,6 +1309,20 @@ def my_processor():
         else:
             return None
 
+    def get_sensor_type(nid, cid):
+        """Get sensor type for a given node and child id
+        Args:
+            nid (int): Node ID
+            cid (int): Child ID
+        Returns:
+            int or None: Sensor type
+        """
+        try:
+            sensor = Sensor.get((Sensor.nid == nid) & (Sensor.cid == cid))
+            return sensor.typ
+        except Sensor.DoesNotExist:
+            return None
+
     return dict( 
         command_string=command_string,
         sensor_string=sensor_string,
@@ -915,6 +1331,7 @@ def my_processor():
         values_string=values_string,
         days_ago=days_ago,
         months_ago=months_ago,
+        get_sensor_type=get_sensor_type,
         )
 
 #endregion
@@ -1099,20 +1516,133 @@ class BatteriesForm(wtf.Form):
 
 #endregion
 #############################################################################
+#region OTA Firmware Functions
 
-def on_connect(client, userdata, flags, rc):
-    applog.info("MQTT: connected with result code "+str(rc))
-    if rc==0:
-        client.subscribe(MQTT_TOPIC)
+def send_message_to_gateway(message):
+    """Send a message to the MySensors Gateway.
+    
+    Args:
+        message: Message string in MySensors format (node;child;cmd;ack;type;payload)
+    """
+    global gateway_socket, applog
+    try:
+        if gateway_socket:
+            msg = message + "\n"
+            gateway_socket.sendall(msg.encode('utf-8'))
+            applog.debug("Sent to gateway: %s", message)
+        else:
+            applog.warning("Cannot send message, gateway not connected")
+    except Exception as e:
+        applog.error("Error sending message to gateway: %s", str(e))
 
-def on_disconnect(client, userdata,  rc):
-    applog.info("MQTT: disconnected")
+
+def send_reboot_request(node_id):
+    """Send reboot request to a node for OTA update.
+    
+    Args:
+        node_id: Node ID to reboot
+    """
+    # Format: node_id;child_id;command;ack;type;payload
+    # Command: C_INTERNAL (3), Type: I_REBOOT (13)
+    message = f"{node_id};255;{mysensors.Commands.C_INTERNAL};0;{mysensors.Internal.I_REBOOT};"
+    send_message_to_gateway(message)
+    applog.info("Sent reboot request to node %d for firmware update", node_id)
+
+
+def handle_stream_message(node_id, child_id, stream_type, payload):
+    """Handle C_STREAM messages for OTA firmware updates.
+    
+    Args:
+        node_id: Node ID
+        child_id: Child sensor ID (should be 255 for firmware)
+        stream_type: Stream type (ST_FIRMWARE_CONFIG_REQUEST or ST_FIRMWARE_REQUEST)
+        payload: Message payload
+        
+    Returns:
+        str or None: Response message or None
+    """
+    global ota_manager, applog
+    
+    if not ota_manager:
+        return None
+        
+    try:
+        if stream_type == mysensors.Stream.ST_FIRMWARE_CONFIG_REQUEST:
+            # Node is requesting firmware config
+            response_payload = ota_manager.handle_firmware_config_request(node_id, payload)
+            if response_payload:
+                # Format response: node;255;C_STREAM;0;ST_FIRMWARE_CONFIG_RESPONSE;payload
+                return f"{node_id};255;{mysensors.Commands.C_STREAM};0;{mysensors.Stream.ST_FIRMWARE_CONFIG_RESPONSE};{response_payload}"
+                
+        elif stream_type == mysensors.Stream.ST_FIRMWARE_REQUEST:
+            # Node is requesting a firmware block
+            response_payload = ota_manager.handle_firmware_request(node_id, payload)
+            if response_payload:
+                # Format response: node;255;C_STREAM;0;ST_FIRMWARE_RESPONSE;payload
+                return f"{node_id};255;{mysensors.Commands.C_STREAM};0;{mysensors.Stream.ST_FIRMWARE_RESPONSE};{response_payload}"
+    except Exception as e:
+        applog.error("Error handling stream message from node %d: %s", node_id, str(e))
+    
+    return None
+
+#endregion
+#############################################################################
+
+def gateway_listener():
+    """Thread function to listen to MySensors Gateway"""
+    global gateway_socket, gateway_running, applog
+    
+    buffer = ""
+    
+    while gateway_running:
+        try:
+            if gateway_socket is None:
+                applog.info("Connecting to MySensors Gateway at %s:%d", GATEWAY_HOST, GATEWAY_PORT)
+                gateway_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                gateway_socket.settimeout(5.0)
+                gateway_socket.connect((GATEWAY_HOST, GATEWAY_PORT))
+                applog.info("Connected to MySensors Gateway")
+            
+            # Read data from gateway
+            data = gateway_socket.recv(1024)
+            if not data:
+                applog.warning("Gateway connection closed")
+                gateway_socket.close()
+                gateway_socket = None
+                time.sleep(5)  # Wait before reconnecting
+                continue
+            
+            # Process received data line by line
+            buffer += data.decode('utf-8', errors='ignore')
+            while '\n' in buffer:
+                line, buffer = buffer.split('\n', 1)
+                process_gateway_message(line)
+                
+        except socket.timeout:
+            # Normal timeout, continue listening
+            continue
+        except Exception as e:
+            applog.error("Gateway connection error: %s", str(e))
+            if gateway_socket:
+                try:
+                    gateway_socket.close()
+                except:
+                    pass
+                gateway_socket = None
+            time.sleep(5)  # Wait before reconnecting
+    
+    # Cleanup on exit
+    if gateway_socket:
+        try:
+            gateway_socket.close()
+        except:
+            pass
 
 
 def main():
     db.init(os.path.join(DB_DIR, DATABASE_FILE))
     db.connect()
-    tables = [Node,Sensor,ValueType,Message]
+    tables = [Node,Sensor,ValueType,Message,Firmware]
     db.create_tables(tables)
     applog.info("opened database")
 
@@ -1145,17 +1675,53 @@ def main():
     if ValueType.select().count()==0:
         fill_tvalues()
 
-    mqttc = mqtt.Client()
-    #mqttc.enable_logger(applog)
-    mqttc.on_message = on_message
-    mqttc.on_connect = on_connect
-    mqttc.on_disconnect = on_disconnect
-    mqttc.connect(MQTT_BROKER, 1883, keepalive=30)
-    mqttc.loop_start()
-    applog.info("listening to MQTT")
+    # Initialize OTA Firmware Manager
+    global ota_manager
+    ota_manager = ota_firmware.OTAFirmwareManager()
+    applog.info("OTA Firmware Manager initialized")
+    
+    # Load existing firmware from database
+    for fw in Firmware.select():
+        try:
+            # Write hex data to temporary file
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.hex', delete=False) as tmp:
+                tmp.write(fw.hex_data)
+                tmp_path = tmp.name
+            
+            # Load into OTA manager
+            ota_manager.load_firmware(fw.fw_type, fw.fw_ver, tmp_path)
+            os.unlink(tmp_path)
+            applog.info("Loaded firmware from DB: type %d version %d", fw.fw_type, fw.fw_ver)
+        except Exception as e:
+            applog.error("Error loading firmware type %d version %d: %s", fw.fw_type, fw.fw_ver, str(e))
 
-    app.run( debug=True, use_reloader=False, host='0.0.0.0' )
+    # Start MySensors Gateway listener thread
+    global gateway_running
+    gateway_running = True
+    gateway_thread = threading.Thread(target=gateway_listener, daemon=True)
+    gateway_thread.start()
+    applog.info("Listening to MySensors Gateway at %s:%d", GATEWAY_HOST, GATEWAY_PORT)
 
+    # Start cleanup scheduler
+    def run_scheduler():
+        while gateway_running:
+            schedule.run_pending()
+            time.sleep(60)  # Check every minute
+    
+    # Schedule daily cleanup at configured hour
+    schedule.every().day.at(f"{CLEANUP_HOUR:02d}:00").do(cleanup_old_data)
+    applog.info(f"Scheduled daily cleanup at {CLEANUP_HOUR:02d}:00 (retention: messages={MESSAGE_RETENTION_DAYS}d, values={VALUE_RETENTION_DAYS}d)")
+    
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+
+    try:
+        app.run(debug=True, use_reloader=False, host='0.0.0.0', port=WEB_PORT)
+    finally:
+        gateway_running = False
+        if gateway_socket:
+            gateway_socket.close()
 
 if __name__ == '__main__':
     main()

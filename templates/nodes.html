@@ -25,52 +25,91 @@
 {% endblock %}
 
 {% block content %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
 {{ pagecontrols() }}
-<table>
-  <tr">
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='nid') }}">Node</a></th>
-   <th class="th-id">API</th>
-   <th >Sketch</th>
-   <th >Revision</th>
-   <th >Location</th>
-   <th >Parent</th>
-   <th >ARC</th>
-   <th class="th-datetime"><a href="{{ url_for(request.endpoint,sort='date') }}">Last seen</a></th>   
-   <th >Days</th>
-   <th class="th-date"><a href="{{ url_for(request.endpoint,sort='battery') }}">Battery chg</a></th>   
-   <th >Months</th>
-   <th >Bat.level</th>
+<div class="table-responsive">
+<table class="table table-hover table-striped">
+  <thead class="table-dark">
+  <tr>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='nid') }}" class="text-white text-decoration-none">Node</a></th>
+   <th>Sketch</th>
+   <th>Location</th>
+   <th><a href="{{ url_for(request.endpoint,sort='date') }}" class="text-white text-decoration-none">Last seen</a></th>   
+   <th>Version</th>
+   <th>Parent</th>
+   <th class="text-center">API</th>
+   <th>Revision</th>
+   <th>ARC</th>
+   <th>Days</th>
+   <th>Months</th>
+   <th>Bat.level</th>
+   <th><a href="{{ url_for(request.endpoint,sort='battery') }}" class="text-white text-decoration-none">Bat.chg</a></th>   
   </tr>
+  </thead>
+  <tbody>
 {% for entry in object_list %}
 <tr>
-  <td class="td-id">
+  <td class="text-center">
     <div class="dropdown">
-      <a class="dropbtn">{{ entry.nid }}</a>
-      <div class="dropdown-content">
-        <a href="{{ url_for('sensors',nid=entry.nid) }}">show sensors</a>
-        <a href="{{ url_for('tvalues',nid=entry.nid) }}">show current values</a>
-        <a href="{{ url_for('values',nid=entry.nid) }}">show all values</a>
-        <a href="{{ url_for('messages',nid=entry.nid) }}">show messages</a>
-        <a href="{{ url_for('confirm_new_battery', nid = entry.nid) }}">battery replaced</a>
-        <a href="{{ url_for('confirm_delete_node_requests', nid = entry.nid) }}">delete requests from node</a>
-        <a href="{{ url_for('confirm_delete_node', nid = entry.nid) }}">delete node!</a>
-      </div>
+      <button class="btn btn-link dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">
+        {{ entry.nid }}
+      </button>
+      <ul class="dropdown-menu">
+        <li><a class="dropdown-item" href="{{ url_for('sensors',nid=entry.nid) }}"><i class="bi bi-thermometer"></i> Show sensors</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('tvalues',nid=entry.nid) }}"><i class="bi bi-activity"></i> Show current values</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('values',nid=entry.nid) }}"><i class="bi bi-graph-up"></i> Show all values</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('messages',nid=entry.nid) }}"><i class="bi bi-envelope"></i> Show messages</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="{{ url_for('confirm_new_battery', nid = entry.nid) }}"><i class="bi bi-battery-charging"></i> Battery replaced</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li>
+          <form action="{{ url_for('node_presentation', nid=entry.nid) }}" method="post" class="d-inline">
+            <button type="submit" class="dropdown-item"><i class="bi bi-broadcast"></i> Request Presentation</button>
+          </form>
+        </li>
+        <li>
+          <form action="{{ url_for('node_discover', nid=entry.nid) }}" method="post" class="d-inline">
+            <button type="submit" class="dropdown-item"><i class="bi bi-search"></i> Discover Node</button>
+          </form>
+        </li>
+        <li>
+          <form action="{{ url_for('reboot_node', nid=entry.nid) }}" method="post" class="d-inline">
+            <button type="submit" class="dropdown-item"><i class="bi bi-arrow-clockwise"></i> Reboot node</button>
+          </form>
+        </li>
+        <li><a class="dropdown-item" href="{{ url_for('confirm_delete_node_requests', nid = entry.nid) }}"><i class="bi bi-trash"></i> Delete requests</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item text-danger" href="{{ url_for('confirm_delete_node', nid = entry.nid) }}"><i class="bi bi-x-circle"></i> Delete node!</a></li>
+      </ul>
     </div>
   </td>
-  {{ td_or_none(entry.api_ver) }}
-  {{ td_or_none(entry.sk_name) }}
-  <!-- {{ td_or_none(entry.sk_version) }} -->
-  <td class="td-days">{{ dim_if_zero(entry.sk_revision) }}</td>
-  <td class="td-loc">{{ dim_if_none(entry.location) }}</td>
-  <td class="td-days">{{ dim_if_none(entry.parent) }}</td>
-  <td class="td-days">{{ dim_if_none(entry.arc) }}</td>
-  <td class="td-datetime" {% if days_ago(entry.lastseen) > 0 %} class="alert" {% endif %} >{{ entry.lastseen.strftime('%d.%m.%Y %H:%M') }}</td>
-  <td class="td-days">{{ days_ago(entry.lastseen) }}</td>
-  <td class="td-date">{{ entry.bat_changed.strftime('%d.%m.%Y') if entry.bat_changed is not none else "?" }}</td>
-  <td class="td-days">{{ dim_if_none( months_ago(entry.bat_changed) ) }}</td>
-  <td class="td-days">{{ dim_if_none( entry.level ) }}</td>
+  <td>{{ dim_if_none(entry.sk_name) }}</td>
+  <td>{{ dim_if_none(entry.location) }}</td>
+  <td {% if days_ago(entry.lastseen) > 0 %} class="table-warning" {% endif %} >{{ entry.lastseen.strftime('%d.%m.%Y %H:%M') }}</td>
+  <td>{{ dim_if_none(entry.sk_version) }}</td>
+  <td class="text-center">{{ dim_if_none(entry.parent) }}</td>
+  <td class="text-center">{{ dim_if_none(entry.api_ver) }}</td>
+  <td class="text-center">{{ dim_if_zero(entry.sk_revision) }}</td>
+  <td class="text-center">{{ dim_if_none(entry.arc) }}</td>
+  <td class="text-center">{{ days_ago(entry.lastseen) }}</td>
+  <td class="text-center">{{ dim_if_none( months_ago(entry.bat_changed) ) }}</td>
+  <td class="text-center">{{ dim_if_none( entry.level ) }}</td>
+  <td>{{ entry.bat_changed.strftime('%d.%m.%Y') if entry.bat_changed is not none else "?" }}</td>
 </tr>
 {% endfor %}
+  </tbody>
 </table>
+</div>
 {{ pagecontrols() }}
 {% endblock %}

@@ -12,34 +12,136 @@
 
     SPDX-License-Identifier: MPL-2.0
 -->
-<html>
+<html lang="de">
 <head>
     <meta charset="utf-8" />
-    <link rel=stylesheet type=text/css href="{{ url_for('static', filename='style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}{% endblock %} - MySensorsTracker</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+    <script>
+        let refreshTimer;
+        let lastActivity = Date.now();
+        let formInteraction = false;
+        
+        function scheduleRefresh() {
+            clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(function() {
+                // Kein Refresh wenn:
+                // - Formular-Interaktion aktiv
+                // - Input-Feld fokussiert
+                // - Aktivität in den letzten 2 Sekunden
+                let hasFormFocus = document.activeElement && 
+                    (document.activeElement.tagName === 'INPUT' || 
+                     document.activeElement.tagName === 'TEXTAREA' ||
+                     document.activeElement.tagName === 'SELECT');
+                
+                if (!formInteraction && !hasFormFocus && (Date.now() - lastActivity > 2000)) {
+                    location.reload();
+                } else {
+                    scheduleRefresh();
+                }
+            }, 3000);
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            scheduleRefresh();
+            
+            // Aktivität tracken
+            document.addEventListener('mousemove', function() {
+                lastActivity = Date.now();
+            });
+            document.addEventListener('click', function() {
+                lastActivity = Date.now();
+            });
+            
+            // Formular-Interaktion tracken
+            document.addEventListener('focus', function(e) {
+                if (e.target.tagName === 'INPUT' || 
+                    e.target.tagName === 'TEXTAREA' || 
+                    e.target.tagName === 'SELECT') {
+                    formInteraction = true;
+                    lastActivity = Date.now();
+                }
+            }, true);
+            
+            document.addEventListener('blur', function(e) {
+                if (e.target.tagName === 'INPUT' || 
+                    e.target.tagName === 'TEXTAREA' || 
+                    e.target.tagName === 'SELECT') {
+                    // 5 Sekunden Puffer nach Formular-Verlassen
+                    setTimeout(function() {
+                        formInteraction = false;
+                    }, 5000);
+                }
+            }, true);
+            
+            document.addEventListener('input', function() {
+                formInteraction = true;
+                lastActivity = Date.now();
+            });
+        });
+    </script>
 </head>
 <body>
-    <header>
-        <div class="navbar">
-            <a href="/" class="navbar-brand">MySensors Dashboard</a>
-            <a href="{{ url_for('nodes') }}" class="navbar-item">Nodes</a>
-            <a href="{{ url_for('locations') }}" class="navbar-item">Locations</a>
-            <a href="{{ url_for('sensors') }}" class="navbar-item">Sensors</a>
-            <a href="{{ url_for('tvalues') }}" class="navbar-item">Current</a>
-            <a href="{{ url_for('values') }}" class="navbar-item">Values</a>
-            <a href="{{ url_for('messages') }}" class="navbar-item">Messages</a>
+    <!-- Bootstrap Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-speedometer2"></i> MySensors Dashboard
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('messages') }}"><i class="bi bi-envelope"></i> Messages</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('nodes') }}"><i class="bi bi-hdd-network"></i> Nodes</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('sensors') }}"><i class="bi bi-thermometer"></i> Sensors</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('tvalues') }}"><i class="bi bi-activity"></i> Current</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('values') }}"><i class="bi bi-graph-up"></i> Values</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('locations') }}"><i class="bi bi-geo-alt"></i> Locations</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('stats') }}"><i class="bi bi-bar-chart"></i> Stats</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/ota"><i class="bi bi-download"></i> OTA</a>
+                    </li>
+                </ul>
+            </div>
         </div>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="container-fluid mt-3">
         {% block header %}{% endblock %}
-    </header>
-    <div class="body-content">
+    </div>
+
+    <!-- Main Content -->
+    <div class="container-fluid">
         {% block content %}{% endblock %}
     </div>
 
-    <!--    
-    <footer>
-        <p>Copyright &copy;2020 Bernd Waldmann. Built with <a href="https://palletsprojects.com/p/flask/">Flask</a>.</p>
-    </footer>
-    -->
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     
+    {% block scripts %}{% endblock %}
 </body>
 </html>

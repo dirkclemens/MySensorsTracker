@@ -25,49 +25,73 @@
 
 {% block content %}
 {{ pagecontrols() }}
-<table>
-  <tr">
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='usid') }}">Node</a></th>
-   <th >Location</th>
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='cid') }}">Sensor</a></th>
-   <th >Type</th>
+<div class="table-responsive">
+<table class="table table-hover table-striped">
+  <thead class="table-dark">
+  <tr>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='usid') }}" class="text-white text-decoration-none">Node</a></th>
+   <th>Location</th>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='cid') }}" class="text-white text-decoration-none">Sensor</a></th>
+   <th>Type</th>
    <th>Description</th>
    <th>Values</th>
-   <th class="th-datetime"><a href="{{ url_for(request.endpoint,sort='date') }}">Last seen</a></th>
-   <th >days</th>
+   <th><a href="{{ url_for(request.endpoint,sort='date') }}" class="text-white text-decoration-none">Last seen</a></th>
+   <th class="text-center">days</th>
   </tr>
+  </thead>
+  <tbody>
 {% for entry in object_list %}
 <tr>  
-  <td class="td-id">
+  <td class="text-center">
     <div class="dropdown">
-      <a class="dropbtn">{{ entry.nid }}</a>
-      <div class="dropdown-content">
-        <a href="{{ url_for('values', nid=entry.nid) }}">show values for this node</a>
-        <a href="{{ url_for('messages', nid=entry.nid) }}">show messages for this node</a>
-        <a href="{{ url_for('sensors',nid = entry.nid) }}">show only this node</a>
-        <a href="{{ url_for('sensors',nid = '-' ~ entry.nid) }}">show all but this node</a>         
-        <a href="{{ url_for('sensors') }}">show all nodes</a>
-      </div>
+      <button class="btn btn-link dropdown-toggle p-0" type="button" data-bs-toggle="dropdown"
+              data-bs-toggle="tooltip" data-bs-placement="top" 
+              title="{{ entry.nid.sk_name or 'Unknown' }}{% if entry.nid.location %} - {{ entry.nid.location }}{% endif %}">
+        {{ entry.nid.nid }}
+      </button>
+      <ul class="dropdown-menu">
+        <li><a class="dropdown-item" href="{{ url_for('values', nid=entry.nid.nid) }}">Show values for this node</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('messages', nid=entry.nid.nid) }}">Show messages for this node</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="{{ url_for('sensors',nid = entry.nid.nid) }}">Show only this node</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('sensors',nid = '-' ~ entry.nid.nid) }}">Show all but this node</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('sensors') }}">Show all nodes</a></li>
+      </ul>
     </div>
   </td>
-  <td class="td-loc">{{ entry.nid.location }}</td>
-  <td class="td-id">
+  <td>{{ dim_if_none(entry.nid.location) }}</td>
+  <td class="text-center">
     <div class="dropdown">
-      <a class="dropbtn">{{ entry.cid }}</a>
-      <div class="dropdown-content">
-        <a href="{{ url_for('tvalues', usid=entry.usid, nid=entry.nid, cid=entry.cid) }}">show current values</a>
-        <a href="{{ url_for('values', usid=entry.usid, nid=entry.nid, cid=entry.cid) }}">show all values</a>
-        <a href="{{ url_for('confirm_delete_sensor', usid=entry.usid) }}">delete sensor instance</a>
-      </div>
+      <button class="btn btn-link dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">{{ entry.cid }}</button>
+      <ul class="dropdown-menu">
+        <li><a class="dropdown-item" href="{{ url_for('tvalues', usid=entry.usid, nid=entry.nid, cid=entry.cid) }}">Show current values</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('values', usid=entry.usid, nid=entry.nid, cid=entry.cid) }}">Show all values</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item text-danger" href="{{ url_for('confirm_delete_sensor', usid=entry.usid) }}">Delete sensor instance</a></li>
+      </ul>
     </div>
   </td>
-  <td class="td-symbol">{{ dim_if_none( sensor_string(entry.typ) ) }}</td>
-  {{ td_or_none(entry.name) }}
-  <td>{{ values_string(entry.values) }}</td>
-  <td class="td-datetime {% if days_ago(entry.lastseen) > 0 %}alert{% endif %}" >{{ entry.lastseen.strftime('%d.%m.%Y %H:%M') }}</td>
-  <td class="td-days">{{ days_ago(entry.lastseen) }}</td>
+  <td><code>{{ dim_if_none( sensor_string(entry.typ) ) }}</code></td>
+  <td>{{ dim_if_none(entry.name) }}</td>
+  <td><small>{{ values_string(entry.values) }}</small></td>
+  <td {% if days_ago(entry.lastseen) > 0 %}class="table-warning"{% endif %}>{{ entry.lastseen.strftime('%d.%m.%Y %H:%M') }}</td>
+  <td class="text-center">{{ days_ago(entry.lastseen) }}</td>
 </tr>
 {% endfor %}
+  </tbody>
 </table>
+</div>
 {{ pagecontrols() }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize all tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
 {% endblock %}

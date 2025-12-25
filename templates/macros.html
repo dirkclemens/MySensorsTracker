@@ -13,19 +13,39 @@
 -->
 
 {% macro pagecontrols(nid=None, cid=None, usid=None) %}
-<p>
-    <a href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=1) }}" style="font-size:2em;">&#9198;</a>  
-    <span>  </span>  
-    <a href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=page-1) }}" 
-     {% if page == 1 %} class="disabled" {% endif %} style="font-size:2em;">&#9204;</a> 
-    <span>  </span>
-    Page <strong>{{ page }}</strong> of {{ pagination.get_page_count() }}
-    <span>  </span>
-    <a href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=page+1) }}" 
-     {% if page == pagination.get_page_count() %} class="disabled" {% endif %} style="font-size:2em;">&#9205;</a> 
-    <span>  </span>
-    <a href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=pagination.get_page_count()) }}" style="font-size:2em;">&#9197;</a>
-    </p>
+<nav aria-label="Page navigation">
+  <ul class="pagination justify-content-center">
+    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=1) }}" 
+         {% if page == 1 %}tabindex="-1" aria-disabled="true"{% endif %}>
+        <i class="bi bi-chevron-bar-left"></i> First
+      </a>
+    </li>
+    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=page-1) }}"
+         {% if page == 1 %}tabindex="-1" aria-disabled="true"{% endif %}>
+        <i class="bi bi-chevron-left"></i> Previous
+      </a>
+    </li>
+    <li class="page-item active">
+      <span class="page-link">
+        Page {{ page }} of {{ pagination.get_page_count() }}
+      </span>
+    </li>
+    <li class="page-item {% if page == pagination.get_page_count() %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=page+1) }}"
+         {% if page == pagination.get_page_count() %}tabindex="-1" aria-disabled="true"{% endif %}>
+        Next <i class="bi bi-chevron-right"></i>
+      </a>
+    </li>
+    <li class="page-item {% if page == pagination.get_page_count() %}disabled{% endif %}">
+      <a class="page-link" href="{{ url_for(request.endpoint,sort=sort,nid=nid,cid=cid,usid=usid,page=pagination.get_page_count()) }}"
+         {% if page == pagination.get_page_count() %}tabindex="-1" aria-disabled="true"{% endif %}>
+        Last <i class="bi bi-chevron-bar-right"></i>
+      </a>
+    </li>
+  </ul>
+</nav>
 {% endmacro %}
 
 {% macro td_or_none(val) %}

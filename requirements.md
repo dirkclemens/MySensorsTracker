@@ -3,7 +3,7 @@ __MySensorsTracker__: a MySensors dashboard
 
 - [Use Cases](#use-cases)
 - [Requirements](#requirements)
-  - [MQTT](#mqtt)
+  - [MySensors Gateway](#mysensors-gateway)
     - [Nodes](#nodes)
     - [Sensors](#sensors)
   - [UI, Input](#ui-input)
@@ -34,19 +34,19 @@ Notation:
 
 # Requirements
 
-## MQTT
+## MySensors Gateway
 
-- [x] `R001` capture all MQTT messages from MySensors nodes, store in database
+- [x] `R001` capture all messages from MySensors Gateway via TCP, store in database
 
-- [x] `R002` if same message is received multiple times, from different gateways, then ignore all but one
+- [x] `R002` if same message is received multiple times, ignore duplicates
 
 - [x] `R012` capture time & date when message was received
 
-- [ ] `R013` capture which gateway received the message
+- [x] `R013` direct connection to MySensors Ethernet Gateway
 
 ### Nodes
 
-- [x] `R003` capture information about nodes, from MQTT messages
+- [x] `R003` capture information about nodes, from Gateway messages
   - [x] `R003.1` capture MySensors API version of node
   - [x] `R003.2` capture sketch name (sent by node via MySensors `sendSketchInfo()` function)
   - [x] `R003.3` capture sketch version string (sent by node via MySensors `sendSketchInfo()` function)
@@ -56,7 +56,7 @@ Notation:
   - [x] `R003.7` capture battery level reported by nodes
 
 ### Sensors
-- [x] `R004` capture information about sensors, from MQTT
+- [x] `R004` capture information about sensors, from Gateway
   - [x] `R004.1` capture sensor description
   - [x] `R004.2` capture sensor type, e.g. S_DOOR
   - [x] `R004.§` capture which V_xxx value types a sensor has reported

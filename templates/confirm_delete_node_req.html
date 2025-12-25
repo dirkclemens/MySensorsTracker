@@ -13,22 +13,38 @@
 -->
 {% extends 'base.html' %}
 
-{% block title %}Confirm node <i>requests</i> deletion{% endblock %}
+{% block title %}Confirm node requests deletion{% endblock %}
 
-{% with messages = get_flashed_messages(with_categories=true) %}
-{% if messages %}
-<ul>
-    {% for message in messages %}
- 	<li>{ { message[1] }}</li>
-{% endfor %}</ul>
-{% endif %}
-{% endwith %}
+{% block header %}
+  <h1><i class="bi bi-trash text-danger"></i> Delete Node Requests</h1>
+{% endblock %}
 
 {% block content %}
-<form action="" method="post">
-<div class="input">
-    {{ form.f_nid.label }} {{ form.f_nid }}
-    <input type="submit" class="input submit modal-button" value="Delete requests !" />
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="card border-danger mb-3" style="max-width: 40rem;">
+  <div class="card-header bg-danger text-white">
+    <h5 class="mb-0">Delete all requests from this node</h5>
+  </div>
+  <div class="card-body">
+    <form action="" method="post">
+      <div class="mb-3">
+        {{ form.f_nid.label(class="form-label") }}
+        {{ form.f_nid(class="form-control", readonly=true) }}
+      </div>
+      <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> Delete Requests!</button>
+      <a href="{{ url_for('nodes') }}" class="btn btn-secondary"><i class="bi bi-x-circle"></i> Cancel</a>
+    </form>
+  </div>
 </div>
-</form>
 {% endblock %}

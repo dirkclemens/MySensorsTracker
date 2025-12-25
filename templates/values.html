@@ -29,42 +29,68 @@
 
 {% block content %}
 {{ pagecontrols(nid=nid, cid=cid, usid=usid) }}
-<table style="width:60%;">
-  <tr">
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='usid',nid=nid,cid=cid,usid=usid) }}">Node</a></th>
-   <th class="th-id"><a href="{{ url_for(request.endpoint,sort='cid',nid=nid,cid=cid,usid=usid) }}">Sensor</a></th>
-   <th class="th-datetime"><a href="{{ url_for(request.endpoint,sort='date',nid=nid,cid=cid,usid=usid) }}">Received</a></th>
-   <th >Type</th>
-   <th >Value</th>
+<div class="table-responsive">
+<table class="table table-hover table-striped">
+  <thead class="table-dark">
+  <tr>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='usid',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Node</a></th>
+   <th>Location</th>
+   <th class="text-center"><a href="{{ url_for(request.endpoint,sort='cid',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Sensor</a></th>
+   <th><a href="{{ url_for(request.endpoint,sort='date',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Received</a></th>
+   <th>Sensor Type</th>
+   <th>Value Type</th>
+   <th>Value</th>
   </tr>
+  </thead>
+  <tbody>
   {% for entry in object_list %}
     <tr>
-      <td class="td-id">
+      <td class="text-center">
         <div class="dropdown">
-          <a class="dropbtn">{{ entry.nid }}</a>
-          <div class="dropdown-content">
-            <a href="{{ url_for(request.endpoint, nid = entry.nid) }}">show only this node</a>
-            <a href="{{ url_for(request.endpoint, nid = '-' ~ entry.nid) }}">show all but this node</a>         
-            <a href="{{ url_for(request.endpoint) }}">show all nodes</a>
-          </div>
+          <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown"
+                  data-bs-toggle="tooltip" data-bs-placement="top" 
+                  title="{{ entry.nid.sk_name or 'Unknown' }}{% if entry.nid.location %} - {{ entry.nid.location }}{% endif %}">
+            {{ entry.nid.nid }}
+          </button>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint, nid = entry.nid.nid) }}">Show only this node</a></li>
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint, nid = '-' ~ entry.nid.nid) }}">Show all but this node</a></li>
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all nodes</a></li>
+          </ul>
         </div>
       </td>
-      <td class="td-id">
+      <td>{{ entry.nid.location }}</td>
+      <td class="text-center">
         <div class="dropdown">
-          <a class="dropbtn">{{ entry.cid }}</a>
-          <div class="dropdown-content">
-            <a href="{{ url_for(request.endpoint, usid = entry.usid, nid=entry.nid, cid=entry.cid) }}">show only this sensor instance</a>
-            <a href="{{ url_for(request.endpoint, cid = entry.cid) }}">show only this sensor type</a>
-            <a href="{{ url_for(request.endpoint, cid = '-' ~ entry.cid) }}">show all but this sensor type</a>         
-            <a href="{{ url_for(request.endpoint) }}">show all</a>
-          </div>
+          <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">{{ entry.cid }}</button>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint, usid = entry.usid, nid=entry.nid, cid=entry.cid) }}">Show only this sensor instance</a></li>
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint, cid = entry.cid) }}">Show only this sensor type</a></li>
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint, cid = '-' ~ entry.cid) }}">Show all but this sensor type</a></li>
+            <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all</a></li>
+          </ul>
         </div>
       </td>
-      <td class="td-datetime">{{ entry.received.strftime('%d.%m.%Y %H:%M') }}</td>
-      <td class="td-symbol">{{ dim_if_none( value_string(entry.typ) ) }}</td>
-      {{ td_or_none(entry.value) }}
+      <td><small>{{ entry.received.strftime('%d.%m.%Y %H:%M') }}</small></td>
+      <td><code>{{ dim_if_none( sensor_string(entry.sensor.typ) if entry.sensor else None ) }}</code></td>
+      <td><code>{{ dim_if_none( value_string(entry.typ) ) }}</code></td>
+      <td>{{ dim_if_none(entry.value) }}</td>
     </tr>
   {% endfor %}
+  </tbody>
 </table>
+</div>
 {{ pagecontrols(nid=nid, cid=cid, usid=usid) }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize all tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
 {% endblock %}

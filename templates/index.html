@@ -3,8 +3,88 @@
 {% block title %}Home{% endblock %}
 
 {% block header %}
+  <h1><i class="bi bi-house"></i> MySensors Dashboard</h1>
 {% endblock %}
+
 {% block content %}
-<p>{{ rev }}</p>
-<p>Copyright &copy;2020 Bernd Waldmann. Built with <a href="https://palletsprojects.com/p/flask/">Flask</a>.</p>
+<div class="row">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-body text-center py-5">
+        <h2 class="mb-2">Welcome to MySensors Tracker</h2>
+        <p class="lead mb-2">Monitor and manage your MySensors network</p>
+        <div class="row mt-4 g-3">
+          <div class="col-md-3 col-sm-6">
+            <a href="{{ url_for('messages') }}" class="text-decoration-none">
+              <div class="card border-secondary h-100">
+                <div class="card-body">
+                  <i class="bi bi-envelope fs-1 text-secondary"></i>
+                  <h5 class="mt-2">Messages</h5>
+                  <p class="text-muted small">View all messages</p>
+                </div>
+              </div>
+            </a>
+          </div>            
+          <div class="col-md-3 col-sm-6">
+            <a href="{{ url_for('nodes') }}" class="text-decoration-none">
+              <div class="card border-primary h-100">
+                <div class="card-body">
+                  <i class="bi bi-hdd-network fs-1 text-primary"></i>
+                  <h5 class="mt-2">Nodes</h5>
+                  <p class="text-muted small">View all nodes</p>
+                </div>
+              </div>
+            </a>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <a href="{{ url_for('sensors') }}" class="text-decoration-none">
+              <div class="card border-success h-100">
+                <div class="card-body">
+                  <i class="bi bi-thermometer fs-1 text-success"></i>
+                  <h5 class="mt-2">Sensors</h5>
+                  <p class="text-muted small">View all sensors</p>
+                </div>
+              </div>
+            </a>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <a href="{{ url_for('tvalues') }}" class="text-decoration-none">
+              <div class="card border-info h-100">
+                <div class="card-body">
+                  <i class="bi bi-activity fs-1 text-info"></i>
+                  <h5 class="mt-2">Current Values</h5>
+                  <p class="text-muted small">Live sensor data</p>
+                </div>
+              </div>
+            </a>
+          </div>
+        </div>
+        <div class="row mt-3 g-3">
+          <div class="col-md-3 col-sm-6">
+            <a href="{{ url_for('stats') }}" class="text-decoration-none">
+              <div class="card border-danger h-100">
+                <div class="card-body">
+                  <i class="bi bi-bar-chart fs-1 text-danger"></i>
+                  <h5 class="mt-2">Statistics</h5>
+                  <p class="text-muted small">Database stats & cleanup</p>
+                </div>
+              </div>
+            </a>
+          </div>
+          <div class="col-md-3 col-sm-6">
+            <a href="/ota" class="text-decoration-none">
+              <div class="card border-warning h-100">
+                <div class="card-body">
+                  <i class="bi bi-download fs-1 text-warning"></i>
+                  <h5 class="mt-2">OTA Updates</h5>
+                  <p class="text-muted small">Firmware management</p>
+                </div>
+              </div>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
