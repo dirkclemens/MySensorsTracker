@@ -79,7 +79,7 @@
       </td>
       <td><code>{{ dim_if_none( sensor_string(entry.usid.typ) ) }}</code></td>
       <td><code>{{ dim_if_none( value_string(entry.typ) ) }}</code></td>
-      <td class="text-end">{{ dim_if_none(entry.value) }}</td>
+      <td>{{ dim_if_none(entry.value) }}</td>
       <td><small>{{ entry.received.strftime('%d.%m.%Y %H:%M') }}</small></td>
     </tr>
   {% endfor %}

@@ -34,6 +34,79 @@
 {% endblock %}
 
 {% block content %}
+<!-- Send Message Form -->
+<div class="accordion mb-3" id="messageFormAccordion">
+  <div class="accordion-item">
+    <h2 class="accordion-header">
+      <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sendMessageForm" aria-expanded="false" aria-controls="sendMessageForm">
+        <i class="bi bi-envelope me-2"></i> Send raw Message
+      </button>
+    </h2>
+    <div id="sendMessageForm" class="accordion-collapse collapse" data-bs-parent="#messageFormAccordion">
+      <div class="accordion-body">
+        <form method="POST" action="{{ url_for('send_custom_message') }}" class="row g-3" id="customMessageForm">
+          <div class="col-md-2">
+            <label for="nodeId" class="form-label">Node ID</label>
+            <input type="number" class="form-control form-control-sm" id="nodeId" name="node_id" min="0" max="255" value="255" required>
+          </div>
+          <div class="col-md-2">
+            <label for="childId" class="form-label">Child ID</label>
+            <input type="number" class="form-control form-control-sm" id="childId" name="child_id" min="0" max="255" value="255" required>
+          </div>
+          <div class="col-md-2">
+            <label for="command" class="form-label">Command</label>
+            <select class="form-select form-select-sm" id="command" name="command" required>
+              <option value="0">0 - PRESENTATION</option>
+              <option value="1">1 - SET</option>
+              <option value="2">2 - REQ</option>
+              <option value="3" selected>3 - INTERNAL</option>
+              <option value="4">4 - STREAM</option>
+            </select>
+          </div>
+          <div class="col-md-1">
+            <label for="ack" class="form-label">ACK</label>
+            <select class="form-select form-select-sm" id="ack" name="ack" required>
+              <option value="0" selected>0</option>
+              <option value="1">1</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label for="msgType" class="form-label">Type</label>
+            <input type="number" class="form-control form-control-sm" id="msgType" name="msg_type" min="0" max="255" value="18" required>
+          </div>
+          <div class="col-md-3">
+            <label for="payload" class="form-label">Payload (max. 25 Bytes)</label>
+            <input type="text" class="form-control form-control-sm" id="payload" name="payload" value="">
+          </div>
+          
+          <div class="col-12">
+            <label class="form-label">Vorlagen:</label>
+            <div class="btn-group btn-group-sm" role="group">
+              <button type="button" class="btn btn-outline-secondary" onclick="setTemplate('reboot')">Reboot</button>
+              <button type="button" class="btn btn-outline-secondary" onclick="setTemplate('presentation')">Presentation</button>
+              <button type="button" class="btn btn-outline-secondary" onclick="setTemplate('discover')">Discover</button>
+              <button type="button" class="btn btn-outline-secondary" onclick="setTemplate('heartbeat')">Heartbeat</button>
+            </div>
+          </div>
+          
+          <div class="col-12">
+            <div class="alert alert-info mb-0">
+              <small><strong>Message:</strong> <code id="messagePreview">255;255;3;0;18;</code></small>
+            </div>
+          </div>
+          
+          <div class="col-12">
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i class="bi bi-send"></i> Send Message
+            </button>
+            <button type="reset" class="btn btn-secondary btn-sm">Reset</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 {{ pagecontrols(nid=nid, cid=cid, usid=usid) }}
 <div class="table-responsive">
 <table class="table table-hover table-sm">
@@ -91,13 +164,96 @@
 {% endblock %}
 
 {% block scripts %}
+{{ super() }}
 <script>
+// Templates for common messages
+const templates = {
+    reboot: { node: 255, child: 255, cmd: 3, ack: 0, type: 13, payload: '' },
+    presentation: { node: 255, child: 255, cmd: 3, ack: 0, type: 19, payload: '' },
+    discover: { node: 255, child: 255, cmd: 3, ack: 0, type: 21, payload: '' },
+    heartbeat: { node: 255, child: 255, cmd: 3, ack: 0, type: 18, payload: '' }
+};
+
+function setTemplate(name) {
+    const tmpl = templates[name];
+    if (!tmpl) return;
+    
+    document.getElementById('nodeId').value = tmpl.node;
+    document.getElementById('childId').value = tmpl.child;
+    document.getElementById('command').value = tmpl.cmd;
+    document.getElementById('ack').value = tmpl.ack;
+    document.getElementById('msgType').value = tmpl.type;
+    document.getElementById('payload').value = tmpl.payload;
+    
+    updatePreview();
+}
+
+function updatePreview() {
+    const node = document.getElementById('nodeId').value;
+    const child = document.getElementById('childId').value;
+    const cmd = document.getElementById('command').value;
+    const ack = document.getElementById('ack').value;
+    const type = document.getElementById('msgType').value;
+    const payload = document.getElementById('payload').value;
+    
+    const message = `${node};${child};${cmd};${ack};${type};${payload}`;
+    document.getElementById('messagePreview').textContent = message;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize all tooltips
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+    
+    // Update preview on input change
+    ['nodeId', 'childId', 'command', 'ack', 'msgType', 'payload'].forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem) {
+            elem.addEventListener('input', updatePreview);
+            elem.addEventListener('change', updatePreview);
+        }
+    });
+    
+    // Initial preview
+    updatePreview();
+    
+    // Form accordion state persistence
+    const formCollapse = document.getElementById('sendMessageForm');
+    const accordionButton = document.querySelector('[data-bs-target="#sendMessageForm"]');
+    
+    // Restore accordion state from localStorage
+    if (localStorage.getItem('messageFormOpen') === 'true') {
+        const bsCollapse = new bootstrap.Collapse(formCollapse, { show: true });
+        accordionButton.classList.remove('collapsed');
+        accordionButton.setAttribute('aria-expanded', 'true');
+    }
+    
+    // Save accordion state when changed
+    formCollapse.addEventListener('shown.bs.collapse', function() {
+        localStorage.setItem('messageFormOpen', 'true');
+        // Prevent auto-refresh while form is open
+        if (typeof formInteraction !== 'undefined') {
+            formInteraction = true;
+        }
+    });
+    
+    formCollapse.addEventListener('hidden.bs.collapse', function() {
+        localStorage.setItem('messageFormOpen', 'false');
+        if (typeof formInteraction !== 'undefined') {
+            formInteraction = false;
+        }
+    });
+    
+    // Keep form open after submit
+    const customMessageForm = document.getElementById('customMessageForm');
+    if (customMessageForm) {
+        customMessageForm.addEventListener('submit', function() {
+            // Ensure form stays open after submit by setting localStorage
+            localStorage.setItem('messageFormOpen', 'true');
+        });
+    }
 });
 </script>
 {% endblock %}

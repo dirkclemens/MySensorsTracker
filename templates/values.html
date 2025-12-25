@@ -42,10 +42,10 @@
    <th class="text-center"><a href="{{ url_for(request.endpoint,sort='usid',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Node</a></th>
    <th>Location</th>
    <th class="text-center"><a href="{{ url_for(request.endpoint,sort='cid',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Sensor</a></th>
-   <th><a href="{{ url_for(request.endpoint,sort='date',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Received</a></th>
    <th>Sensor Type</th>
    <th>Value Type</th>
    <th>Value</th>
+   <th><a href="{{ url_for(request.endpoint,sort='date',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Received</a></th>
   </tr>
   </thead>
   <tbody>
@@ -77,10 +77,10 @@
           </ul>
         </div>
       </td>
-      <td><small>{{ entry.received.strftime('%d.%m.%Y %H:%M') }}</small></td>
       <td><code>{{ dim_if_none( sensor_string(entry.sensor.typ) if entry.sensor else None ) }}</code></td>
       <td><code>{{ dim_if_none( value_string(entry.typ) ) }}</code></td>
       <td>{{ dim_if_none(entry.value) }}</td>
+      <td><small>{{ entry.received.strftime('%d.%m.%Y %H:%M') }}</small></td>
     </tr>
   {% endfor %}
   </tbody>

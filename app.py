@@ -6,7 +6,6 @@
 # This Revision: $Id: app.py 1685 2024-11-27 11:19:02Z  $
 #
 # Tracker for MySensors messages, with web viewer
-
 #
 #   Copyright (C) 2019,2021 Bernd Waldmann
 #
@@ -85,12 +84,18 @@ def init_logging():
         },
         'loggers': {
             'root': {
-                'level': logging.INFO,
-                'handlers': ['wsgi','console']
+                'level': logging.WARNING,
+                'handlers': ['console']  # Only console, wsgi causes duplicates
             },
             'app': {
                 'level': logging.INFO,
                 'handlers': ['console'],
+                'propagate': False  # Don't propagate to root to avoid duplicates
+            },
+            'werkzeug': {
+                'level': logging.WARNING,
+                'handlers': ['console'],
+                'propagate': False
             },
         },
         'disable_existing_loggers': False,
@@ -104,7 +109,7 @@ applog = init_logging()
 
 if not os.path.isdir(DB_DIR):
     DB_DIR = os.path.dirname(os.path.realpath(__file__))
-DATABASE_URI = 'sqlite:///%s' % os.path.join(DB_DIR, DATABASE_FILE)
+# DATABASE_URI = 'sqlite:///%s' % os.path.join(DB_DIR, DATABASE_FILE)
 applog.info('Using database at '+DB_DIR)
 
 # Retention Policy Configuration
@@ -114,8 +119,7 @@ CLEANUP_HOUR = 3              # Run cleanup daily at 3 AM
 
 app = Flask(__name__)
 app.config['FLASK_ENV'] = 'development'
-app.config['DEBUG'] = True
-app.config['TESTING'] = True
+# DEBUG wird durch app.run(debug=True) gesetzt
 #app.secret_key = 'mysensors-tracker-secret-key-change-in-production'  # Für Flask Sessions (flash messages)
 import secrets
 app.secret_key = secrets.token_hex(32) 
@@ -1206,13 +1210,73 @@ def ota_update_node(nid):
 @app.route('/nodes/<int:nid>/reboot', methods=['POST'])
 def reboot_node(nid):
     """Send reboot command to a node."""
+    global gateway_socket
     try:
+        if gateway_socket is None:
+            flask.flash(f"Cannot reboot node {nid}: Gateway not connected!", "error")
+            applog.error("Cannot reboot node %d: Gateway socket is None", nid)
+            return redirect(url_for('nodes'))
+        
         send_reboot_request(nid)
-        flask.flash(f"Reboot command sent to node {nid}", "success")
+        flask.flash(f"Reboot command sent to node {nid}. Check logs for details.", "success")
     except Exception as e:
+        applog.error(f"Error sending reboot to node {nid}: {e}")
         flask.flash(f"Error sending reboot to node {nid}: {str(e)}", "error")
     
     return redirect(url_for('nodes'))
+
+
+@app.route('/messages/send', methods=['POST'])
+def send_custom_message():
+    """Send a custom message to the MySensors Gateway."""
+    global gateway_socket
+    try:
+        if gateway_socket is None:
+            flask.flash("Cannot send message: Gateway not connected!", "error")
+            applog.error("Cannot send custom message: Gateway socket is None")
+            return redirect(url_for('messages'))
+        
+        # Get form data
+        node_id = int(request.form.get('node_id', 255))
+        child_id = int(request.form.get('child_id', 255))
+        command = int(request.form.get('command', 3))
+        ack = int(request.form.get('ack', 0))
+        msg_type = int(request.form.get('msg_type', 13))
+        payload = request.form.get('payload', '').strip()
+        
+        # Validate ranges
+        if not (0 <= node_id <= 255):
+            flask.flash("Node ID must be between 0 and 255", "error")
+            return redirect(url_for('messages'))
+        if not (0 <= child_id <= 255):
+            flask.flash("Child ID must be between 0 and 255", "error")
+            return redirect(url_for('messages'))
+        if not (0 <= command <= 4):
+            flask.flash("Command must be between 0 and 4", "error")
+            return redirect(url_for('messages'))
+        if not (0 <= ack <= 1):
+            flask.flash("ACK must be 0 or 1", "error")
+            return redirect(url_for('messages'))
+        if not (0 <= msg_type <= 255):
+            flask.flash("Type must be between 0 and 255", "error")
+            return redirect(url_for('messages'))
+        
+        # Format message
+        message = f"{node_id};{child_id};{command};{ack};{msg_type};{payload}"
+        
+        # Send to gateway
+        send_message_to_gateway(message)
+        
+        flask.flash(f"Message sent: {message}", "success")
+        applog.info("Custom message sent via web UI: %s", message)
+        
+    except ValueError as e:
+        flask.flash(f"Invalid input: {str(e)}", "error")
+    except Exception as e:
+        applog.error(f"Error sending custom message: {e}")
+        flask.flash(f"Error sending message: {str(e)}", "error")
+    
+    return redirect(url_for('messages'))
 
 
 #endregion
@@ -1529,22 +1593,25 @@ def send_message_to_gateway(message):
         if gateway_socket:
             msg = message + "\n"
             gateway_socket.sendall(msg.encode('utf-8'))
-            applog.debug("Sent to gateway: %s", message)
+            applog.info("Sent to gateway: %s", message)  # Changed to INFO to always see it
         else:
             applog.warning("Cannot send message, gateway not connected")
     except Exception as e:
         applog.error("Error sending message to gateway: %s", str(e))
 
 
-def send_reboot_request(node_id):
+def send_reboot_request(node_id, request_ack=False):
     """Send reboot request to a node for OTA update.
     
     Args:
         node_id: Node ID to reboot
+        request_ack: Whether to request acknowledgement (default: False)
     """
     # Format: node_id;child_id;command;ack;type;payload
     # Command: C_INTERNAL (3), Type: I_REBOOT (13)
-    message = f"{node_id};255;{mysensors.Commands.C_INTERNAL};0;{mysensors.Internal.I_REBOOT};"
+    ack = 1 if request_ack else 0
+    message = f"{node_id};255;{mysensors.Commands.C_INTERNAL};{ack};{mysensors.Internal.I_REBOOT};"
+    applog.info("Preparing reboot request for node %d (ack=%d): '%s'", node_id, ack, message)
     send_message_to_gateway(message)
     applog.info("Sent reboot request to node %d for firmware update", node_id)
 
