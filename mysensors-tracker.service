@@ -6,8 +6,8 @@ Documentation=https://www.mysensors.org/
 
 [Service]
 Type=simple
-User=dirk
-Group=dirk
+#User=dirk
+#Group=dirk
 WorkingDirectory=/opt/mystracker
 
 # Vollständige Umgebungsvariablen
