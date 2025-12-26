@@ -7,3 +7,7 @@
 /__pycache__
 /venv
 /static/*.woff
+/.github
+.dockerignore
+Dockerfile
+docker-compose.yml
