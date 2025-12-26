@@ -44,8 +44,12 @@ Now install the required libraries
 cd ~/mytracker
 python3 -m venv venv
 source venv/bin/activate
-pip3 install peewee flask wtforms ~~paho-mqtt~~ schedule
+venv/bin/python -m pip install peewee flask wtforms schedule intelhex crcmod ~~paho-mqtt~~ 
+or 
+venv/bin/python -m pip install -r ./requirements.txt
 ```
+
+
 
 Now you can just run the app
 ```sh
