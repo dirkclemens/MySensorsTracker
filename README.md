@@ -44,7 +44,7 @@ Now install the required libraries
 cd ~/mytracker
 python3 -m venv venv
 source venv/bin/activate
-venv/bin/python -m pip install peewee flask wtforms schedule intelhex crcmod ~~paho-mqtt~~ 
+venv/bin/python -m pip install peewee flask wtforms schedule intelhex crcmod
 or 
 venv/bin/python -m pip install -r ./requirements.txt
 ```
