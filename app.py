@@ -3,7 +3,6 @@
 # @file          app.py
 # Author       : Bernd Waldmann
 # Created      : Sun Oct 27 23:01:35 2019
-# This Revision: $Id: app.py 1685 2024-11-27 11:19:02Z  $
 #
 # Tracker for MySensors messages, with web viewer
 #
@@ -23,7 +22,8 @@
 #   Start this app with:
 #       venv/bin/python app.py
 #   Stop this app with Ctrl-C or
-#       kill -9 $(lsof -ti:5555)
+#       sudo kill -9 $(lsof -ti:5555)
+#       sudo lsof -ti:5555 | xargs -r sudo kill -9
 #   
 # adjust these constants to your environment
 
@@ -32,7 +32,6 @@ GATEWAY_HOST = "192.168.2.211"          # MySensors Gateway IP address
 GATEWAY_PORT = 5003                     # MySensors Gateway TCP port
 DATABASE_FILE = 'mysensors.db'
 DB_DIR = '/var/lib/mytracker/'
-REVISION = '$Id: app.py 1685 2024-11-27 11:19:02Z  $'
 
 import sys,re,time,os
 import math, json
@@ -41,10 +40,11 @@ import threading
 import logging
 import logging.config
 import schedule
+from queue import Queue, Empty
 from datetime import datetime,timedelta
 from peewee import *                    # MIT license
 import flask                            # BSD license
-from flask import Flask,render_template,request,url_for,redirect
+from flask import Flask,render_template,request,url_for,redirect,Response,jsonify
 from playhouse.flask_utils import FlaskDB
 from playhouse.hybrid import hybrid_property
 from playhouse.flask_utils import object_list
@@ -489,6 +489,35 @@ def add_message( nid,cid,cmd,typ,pay ):
     sensor = add_or_select_sensor(nid,cid)
     sensor.lastseen = tnow
     sensor.save()
+    
+    # Push sensor update to SSE queue
+    try:
+        sensor_data = {
+            'nid': nid,
+            'cid': cid,
+            'usid': sensor.usid,
+            'lastseen': tnow.strftime('%d.%m.%Y %H:%M:%S')
+        }
+        try:
+            sensor_queue.put_nowait(sensor_data)
+        except:
+            pass  # Queue full, skip this update
+    except Exception as e:
+        applog.debug("Error adding sensor to SSE queue: %s", str(e))
+    
+    # Push node update to SSE queue
+    try:
+        node_data = {
+            'nid': nid,
+            'lastseen': tnow.strftime('%d.%m.%Y %H:%M:%S')
+        }
+        try:
+            node_queue.put_nowait(node_data)
+        except:
+            pass
+    except Exception as e:
+        applog.debug("Error adding node to SSE queue: %s", str(e))
+    
     msg = Message.create(nid=nid,cid=cid,cmd=cmd,typ=typ,payload=pay)
     msg.save()
 
@@ -504,6 +533,19 @@ def on_parent_message( nid,val ):
     parent = int(val[8:].strip())
     node.parent = parent
     node.save()
+    
+    # Push parent update to SSE queue
+    try:
+        node_data = {
+            'nid': nid,
+            'parent': parent
+        }
+        try:
+            node_queue.put_nowait(node_data)
+        except:
+            pass
+    except Exception as e:
+        applog.debug("Error adding parent to SSE queue: %s", str(e))
         
     applog.debug("on_parent_message( nid:%d parent:%d'", nid,parent)
 
@@ -529,6 +571,19 @@ def on_arc_message( nid,val ):
         node.arc = success
         node.save()
         applog.info("ARC success: %d%%", success)
+        
+        # Push ARC update to SSE queue
+        try:
+            node_data = {
+                'nid': nid,
+                'arc': success
+            }
+            try:
+                node_queue.put_nowait(node_data)
+            except:
+                pass
+        except Exception as e:
+            applog.debug("Error adding arc to SSE queue: %s", str(e))
     except:
         applog.warn("error in ARC message: '%s'", val)
         pass
@@ -555,6 +610,39 @@ def on_value_message( nid,cid,typ,val ):
     
     tvalue = add_or_select_tvalue(nid,cid,typ,val,datetime.now())
     tvalue.save()
+    
+    # Push value updates to SSE queues
+    try:
+        # For values.html (Message-based values with C_SET command)
+        value_data = {
+            'nid': nid,
+            'cid': cid,
+            'cmd': mysensors.Commands.C_SET,
+            'typ': typ,
+            'payload': val,
+            'received': datetime.now().strftime('%d.%m.%Y %H:%M:%S'),
+            'type_name': valname
+        }
+        try:
+            value_queue.put_nowait(value_data)
+        except:
+            pass
+        
+        # For types.html (Current values by type)
+        tvalue_data = {
+            'nid': nid,
+            'cid': cid,
+            'typ': typ,
+            'value': val,
+            'received': datetime.now().strftime('%d.%m.%Y %H:%M:%S'),
+            'type_name': valname
+        }
+        try:
+            tvalue_queue.put_nowait(tvalue_data)
+        except:
+            pass
+    except Exception as e:
+        applog.debug("Error adding value to SSE queues: %s", str(e))
     
     # my convention: message sensor=98, type=47 is a report on parent node
     if (cid==98 and typ==47 and val.startswith('parent:')):
@@ -616,6 +704,18 @@ def on_internal_message( nid, cid, typ, val ):
         node.save()
     elif (cid==255 and typ==mysensors.Internal.I_BATTERY_LEVEL):
         on_node_value_message( nid, int(mysensors.Values.V_PERCENTAGE), val)
+        # Push battery update to SSE queue
+        try:
+            node_data = {
+                'nid': nid,
+                'bat_level': int(val)
+            }
+            try:
+                node_queue.put_nowait(node_data)
+            except:
+                pass
+        except Exception as e:
+            applog.debug("Error adding battery to SSE queue: %s", str(e))
         return
     else:
         return
@@ -666,6 +766,11 @@ last_time = time.time()
 gateway_socket = None
 gateway_running = False
 ota_manager = None  # OTA Firmware Manager
+message_queue = Queue(maxsize=100)  # Queue for SSE message streaming
+sensor_queue = Queue(maxsize=100)   # Queue for SSE sensor updates
+value_queue = Queue(maxsize=100)    # Queue for SSE value updates (values.html)
+tvalue_queue = Queue(maxsize=100)   # Queue for SSE typed value updates (types.html)
+node_queue = Queue(maxsize=100)     # Queue for SSE node updates (nodes.html)
 
 def process_gateway_message(line):
     """Process a message from MySensors Gateway
@@ -702,6 +807,40 @@ def process_gateway_message(line):
         
         applog.debug("message nid:%d cid:%d cmd:%d typ:%d = '%s'", nid, cid, cmd, typ, val)
         add_message(nid, cid, cmd, typ, val)
+        
+        # Push message to SSE queue for live updates
+        try:
+            # Node-Objekt für Location holen
+            node_obj = None
+            try:
+                node_obj = Node.get(Node.nid == nid)
+            except Exception:
+                node_obj = None
+            message_data = {
+                'nid': nid,
+                'cid': cid,
+                'cmd': cmd,
+                'typ': typ,
+                'payload': val,
+                'received': datetime.now().strftime('%d.%m.%Y %H:%M:%S'),
+                'cmd_name': mysensors.command_names.get(cmd, '?'),
+                'type_name': None,
+                'location': node_obj.location if node_obj and node_obj.location else None
+            }
+            # Get type name based on command
+            if cmd in [mysensors.Commands.C_REQ, mysensors.Commands.C_SET]:
+                message_data['type_name'] = mysensors.value_names.get(typ, '?')
+            elif cmd == mysensors.Commands.C_PRESENTATION:
+                message_data['type_name'] = mysensors.sensor_names.get(typ, '?')
+            elif cmd == mysensors.Commands.C_INTERNAL:
+                message_data['type_name'] = mysensors.internal_names.get(typ, '?')
+            # Try to add to queue, drop if full
+            try:
+                message_queue.put_nowait(message_data)
+            except:
+                pass  # Queue full, skip this update
+        except Exception as e:
+            applog.debug("Error adding message to SSE queue: %s", str(e))
 
         # Handle OTA firmware updates (C_STREAM messages)
         if cmd == mysensors.Commands.C_STREAM:
@@ -733,7 +872,7 @@ def process_gateway_message(line):
 
 @app.route('/')
 def index():
-    return render_template('index.html', rev=REVISION[1:-1])
+    return render_template('index.html')
 
 ##----------------------------------------------------------------------------
 
@@ -761,7 +900,7 @@ def nodes():
 
 @app.route('/sensors')
 def sensors():
-    sort = flask.request.args.get('sort', default="usid", type=str)
+    sort = flask.request.args.get('sort', default="date", type=str)
     cid = flask.request.args.get('cid', default=None, type=int)
     nid = flask.request.args.get('nid', default=None, type=int)
 
@@ -770,10 +909,10 @@ def sensors():
     # sort as requested
     if sort=="cid": 
         query = query.order_by(Sensor.cid)
-    elif sort=="date": 
-        query = query.order_by(Sensor.lastseen.desc())
-    else: 
+    elif sort=="usid":
         query = query.order_by(Sensor.usid)
+    else: 
+        query = query.order_by(Sensor.lastseen.desc())
 
     # filter by nid if requested
     if nid is not None:
@@ -1225,6 +1364,144 @@ def reboot_node(nid):
     
     return redirect(url_for('nodes'))
 
+
+@app.route('/api/stream/messages')
+def stream_messages():
+    """Server-Sent Events stream for live message updates."""
+    def generate():
+        """Generator function for SSE."""
+        # Send initial comment to keep connection alive
+        yield 'retry: 5000\n\n'
+        
+        while True:
+            try:
+                # Wait for new message with timeout
+                message_data = message_queue.get(timeout=30)
+                
+                # Format as SSE event
+                data_json = json.dumps(message_data)
+                yield f'data: {data_json}\n\n'
+                
+            except Empty:
+                # Send keepalive comment every 30 seconds
+                yield ': keepalive\n\n'
+            except GeneratorExit:
+                # Client disconnected
+                break
+            except Exception as e:
+                applog.error(f"Error in SSE stream: {e}")
+                break
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'  # Disable nginx buffering
+    })
+
+##----------------------------------------------------------------------------
+
+@app.route('/api/stream/sensors')
+def stream_sensors():
+    """Server-Sent Events stream for live sensor updates."""
+    def generate():
+        yield 'retry: 5000\n\n'
+        
+        while True:
+            try:
+                sensor_data = sensor_queue.get(timeout=30)
+                data_json = json.dumps(sensor_data)
+                yield f'data: {data_json}\n\n'
+            except Empty:
+                yield ': keepalive\n\n'
+            except GeneratorExit:
+                break
+            except Exception as e:
+                applog.error(f"Error in sensor SSE stream: {e}")
+                break
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+##----------------------------------------------------------------------------
+
+@app.route('/api/stream/values')
+def stream_values():
+    """Server-Sent Events stream for live value updates (values.html)."""
+    def generate():
+        yield 'retry: 5000\n\n'
+        
+        while True:
+            try:
+                value_data = value_queue.get(timeout=30)
+                data_json = json.dumps(value_data)
+                yield f'data: {data_json}\n\n'
+            except Empty:
+                yield ': keepalive\n\n'
+            except GeneratorExit:
+                break
+            except Exception as e:
+                applog.error(f"Error in value SSE stream: {e}")
+                break
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+##----------------------------------------------------------------------------
+
+@app.route('/api/stream/types')
+def stream_types():
+    """Server-Sent Events stream for live typed value updates (types.html)."""
+    def generate():
+        yield 'retry: 5000\n\n'
+        
+        while True:
+            try:
+                tvalue_data = tvalue_queue.get(timeout=30)
+                data_json = json.dumps(tvalue_data)
+                yield f'data: {data_json}\n\n'
+            except Empty:
+                yield ': keepalive\n\n'
+            except GeneratorExit:
+                break
+            except Exception as e:
+                applog.error(f"Error in tvalue SSE stream: {e}")
+                break
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+##----------------------------------------------------------------------------
+
+@app.route('/api/stream/nodes')
+def stream_nodes():
+    """Server-Sent Events stream for live node updates (nodes.html)."""
+    def generate():
+        yield 'retry: 5000\n\n'
+        
+        while True:
+            try:
+                node_data = node_queue.get(timeout=30)
+                data_json = json.dumps(node_data)
+                yield f'data: {data_json}\n\n'
+            except Empty:
+                yield ': keepalive\n\n'
+            except GeneratorExit:
+                break
+            except Exception as e:
+                applog.error(f"Error in node SSE stream: {e}")
+                break
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+##----------------------------------------------------------------------------
 
 @app.route('/messages/send', methods=['POST'])
 def send_custom_message():

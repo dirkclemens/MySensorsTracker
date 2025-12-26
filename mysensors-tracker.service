@@ -1,0 +1,55 @@
+[Unit]
+Description=MySensors Tracker - Web Dashboard for MySensors Gateway
+After=network-online.target
+Wants=network-online.target
+Documentation=https://www.mysensors.org/
+
+[Service]
+Type=simple
+User=dirk
+Group=dirk
+WorkingDirectory=/opt/mystracker
+
+# Vollständige Umgebungsvariablen
+Environment="PATH=/opt/mystracker/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+
+# Starte die Anwendung mit dem Python aus dem venv
+ExecStart=/opt/mystracker/venv/bin/python app.py
+
+# Automatischer Neustart bei Fehler
+Restart=always
+RestartSec=10s
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mysensors-tracker
+
+# Erweiterte Sicherheitseinstellungen
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mystracker
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+
+# Ressourcenlimits
+LimitNOFILE=65536
+MemoryLimit=512M
+
+# Graceful Shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

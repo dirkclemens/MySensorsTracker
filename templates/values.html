@@ -30,6 +30,12 @@
     {% if usid %} for Sensor {{ nid }}:{{ cid }} 
     {% elif nid %} for Node {{ nid }} 
     {% elif cid %} for Sensor type {{ cid }} {% endif %}
+    <span class="ms-3">
+      <span id="liveStatus" class="badge bg-secondary">Disconnected</span>
+      <button id="toggleLive" class="btn btn-sm btn-outline-primary ms-2" title="Enable live updates">
+        <i class="bi bi-play-fill"></i> Live
+      </button>
+    </span>
   </h1>
 {% endblock %}
 
@@ -48,7 +54,7 @@
    <th><a href="{{ url_for(request.endpoint,sort='date',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Received</a></th>
   </tr>
   </thead>
-  <tbody>
+  <tbody id="valueTableBody">
   {% for entry in object_list %}
     <tr>
       <td class="text-center">
@@ -96,6 +102,113 @@ document.addEventListener('DOMContentLoaded', function() {
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // ========== Server-Sent Events (SSE) for Live Updates ==========
+    let eventSource = null;
+    let isLiveEnabled = localStorage.getItem('valueLiveUpdatesEnabled') === 'true';
+    const maxDisplayedValues = 500;
+    
+    const liveStatus = document.getElementById('liveStatus');
+    const toggleButton = document.getElementById('toggleLive');
+    const tableBody = document.getElementById('valueTableBody');
+    
+    function updateStatus(status, text) {
+        liveStatus.className = `badge bg-${status}`;
+        liveStatus.textContent = text;
+    }
+    
+    function connectSSE() {
+        if (eventSource) eventSource.close();
+        
+        updateStatus('warning', 'Connecting...');
+        eventSource = new EventSource('{{ url_for("stream_values") }}');
+        
+        eventSource.onopen = function() {
+            updateStatus('success', 'Live');
+            toggleButton.innerHTML = '<i class="bi bi-pause-fill"></i> Live';
+            toggleButton.classList.remove('btn-outline-primary');
+            toggleButton.classList.add('btn-primary');
+        };
+        
+        eventSource.onmessage = function(event) {
+            try {
+                const value = JSON.parse(event.data);
+                addValueToTable(value);
+            } catch (e) {
+                console.error('Error parsing SSE message:', e);
+            }
+        };
+        
+        eventSource.onerror = function() {
+            updateStatus('danger', 'Error');
+            eventSource.close();
+            if (isLiveEnabled) {
+                setTimeout(() => { if (isLiveEnabled) connectSSE(); }, 5000);
+            }
+        };
+    }
+    
+    function disconnectSSE() {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+        updateStatus('secondary', 'Disconnected');
+        toggleButton.innerHTML = '<i class="bi bi-play-fill"></i> Live';
+        toggleButton.classList.remove('btn-primary');
+        toggleButton.classList.add('btn-outline-primary');
+    }
+    
+    function addValueToTable(value) {
+        const row = document.createElement('tr');
+        row.className = 'animate-fade-in';
+        
+        row.innerHTML = `
+            <td class="text-center">
+                <div class="dropdown">
+                    <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">${value.nid}</button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}?nid=${value.nid}">Show only this node</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all nodes</a></li>
+                    </ul>
+                </div>
+            </td>
+            <td></td>
+            <td class="text-center">
+                <div class="dropdown">
+                    <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">${value.cid}</button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}?cid=${value.cid}">Show only this sensor type</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all</a></li>
+                    </ul>
+                </div>
+            </td>
+            <td><code></code></td>
+            <td><code>${value.type_name || '?'}</code></td>
+            <td>${value.payload || ''}</td>
+            <td><small>${value.received}</small></td>
+        `;
+        
+        tableBody.insertBefore(row, tableBody.firstChild);
+        
+        setTimeout(() => row.classList.remove('animate-fade-in'), 2000);
+        
+        while (tableBody.children.length > maxDisplayedValues) {
+            tableBody.removeChild(tableBody.lastChild);
+        }
+    }
+    
+    toggleButton.addEventListener('click', function() {
+        isLiveEnabled = !isLiveEnabled;
+        localStorage.setItem('valueLiveUpdatesEnabled', isLiveEnabled);
+        isLiveEnabled ? connectSSE() : disconnectSSE();
+    });
+    
+    if (isLiveEnabled) connectSSE();
+    
+    window.addEventListener('beforeunload', function() {
+        if (eventSource) eventSource.close();
     });
 });
 </script>

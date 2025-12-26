@@ -30,69 +30,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <!-- Custom CSS -->
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
-    <script>
-        let refreshTimer;
-        let lastActivity = Date.now();
-        let formInteraction = false;
-        
-        function scheduleRefresh() {
-            clearTimeout(refreshTimer);
-            refreshTimer = setTimeout(function() {
-                // Kein Refresh wenn:
-                // - Formular-Interaktion aktiv
-                // - Input-Feld fokussiert
-                // - Aktivität in den letzten 2 Sekunden
-                let hasFormFocus = document.activeElement && 
-                    (document.activeElement.tagName === 'INPUT' || 
-                     document.activeElement.tagName === 'TEXTAREA' ||
-                     document.activeElement.tagName === 'SELECT');
-                
-                if (!formInteraction && !hasFormFocus && (Date.now() - lastActivity > 2000)) {
-                    location.reload();
-                } else {
-                    scheduleRefresh();
-                }
-            }, 3000);
-        }
-        
-        document.addEventListener('DOMContentLoaded', function() {
-            scheduleRefresh();
-            
-            // Aktivität tracken
-            document.addEventListener('mousemove', function() {
-                lastActivity = Date.now();
-            });
-            document.addEventListener('click', function() {
-                lastActivity = Date.now();
-            });
-            
-            // Formular-Interaktion tracken
-            document.addEventListener('focus', function(e) {
-                if (e.target.tagName === 'INPUT' || 
-                    e.target.tagName === 'TEXTAREA' || 
-                    e.target.tagName === 'SELECT') {
-                    formInteraction = true;
-                    lastActivity = Date.now();
-                }
-            }, true);
-            
-            document.addEventListener('blur', function(e) {
-                if (e.target.tagName === 'INPUT' || 
-                    e.target.tagName === 'TEXTAREA' || 
-                    e.target.tagName === 'SELECT') {
-                    // 5 Sekunden Puffer nach Formular-Verlassen
-                    setTimeout(function() {
-                        formInteraction = false;
-                    }, 5000);
-                }
-            }, true);
-            
-            document.addEventListener('input', function() {
-                formInteraction = true;
-                lastActivity = Date.now();
-            });
-        });
-    </script>
 </head>
 <body>
     <!-- Bootstrap Navbar -->

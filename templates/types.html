@@ -30,6 +30,12 @@
     {% if usid %} for Sensor {{ nid }}:{{ cid }} 
     {% elif nid %} for Node {{ nid }} 
     {% elif cid %} for Sensor type {{ cid }} {% endif %}
+    <span class="ms-3">
+      <span id="liveStatus" class="badge bg-secondary">Disconnected</span>
+      <button id="toggleLive" class="btn btn-sm btn-outline-primary ms-2" title="Enable live updates">
+        <i class="bi bi-play-fill"></i> Live
+      </button>
+    </span>
   </h1>
 {% endblock %}
 
@@ -48,7 +54,7 @@
    <th><a href="{{ url_for(request.endpoint,sort='date',nid=nid,cid=cid,usid=usid) }}" class="text-white text-decoration-none">Received</a></th>
   </tr>
   </thead>
-  <tbody>
+  <tbody id="typeTableBody">
   {% for entry in object_list %}
     <tr>
       <td class="text-center">
@@ -96,6 +102,112 @@ document.addEventListener('DOMContentLoaded', function() {
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // ========== Server-Sent Events (SSE) for Live Updates ==========
+    let eventSource = null;
+    let isLiveEnabled = localStorage.getItem('typeLiveUpdatesEnabled') === 'true';
+    
+    const liveStatus = document.getElementById('liveStatus');
+    const toggleButton = document.getElementById('toggleLive');
+    const tableBody = document.getElementById('typeTableBody');
+    
+    function updateStatus(status, text) {
+        liveStatus.className = `badge bg-${status}`;
+        liveStatus.textContent = text;
+    }
+    
+    function connectSSE() {
+        if (eventSource) eventSource.close();
+        
+        updateStatus('warning', 'Connecting...');
+        eventSource = new EventSource('{{ url_for("stream_types") }}');
+        
+        eventSource.onopen = function() {
+            updateStatus('success', 'Live');
+            toggleButton.innerHTML = '<i class="bi bi-pause-fill"></i> Live';
+            toggleButton.classList.remove('btn-outline-primary');
+            toggleButton.classList.add('btn-primary');
+        };
+        
+        eventSource.onmessage = function(event) {
+            try {
+                const tvalue = JSON.parse(event.data);
+                updateTypeInTable(tvalue);
+            } catch (e) {
+                console.error('Error parsing SSE message:', e);
+            }
+        };
+        
+        eventSource.onerror = function() {
+            updateStatus('danger', 'Error');
+            eventSource.close();
+            if (isLiveEnabled) {
+                setTimeout(() => { if (isLiveEnabled) connectSSE(); }, 5000);
+            }
+        };
+    }
+    
+    function disconnectSSE() {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+        updateStatus('secondary', 'Disconnected');
+        toggleButton.innerHTML = '<i class="bi bi-play-fill"></i> Live';
+        toggleButton.classList.remove('btn-primary');
+        toggleButton.classList.add('btn-outline-primary');
+    }
+    
+    function updateTypeInTable(tvalue) {
+        // Find existing row by nid, cid, and typ
+        const rows = tableBody.querySelectorAll('tr');
+        let existingRow = null;
+        
+        for (let row of rows) {
+            const nidBtn = row.querySelector('td:nth-child(1) button');
+            const cidBtn = row.querySelector('td:nth-child(3) button');
+            const typeCell = row.querySelector('td:nth-child(5) code');
+            
+            if (nidBtn && cidBtn && typeCell) {
+                const rowNid = parseInt(nidBtn.textContent.trim());
+                const rowCid = parseInt(cidBtn.textContent.trim());
+                const rowTypeName = typeCell.textContent.trim();
+                
+                if (rowNid === tvalue.nid && rowCid === tvalue.cid && rowTypeName === tvalue.type_name) {
+                    existingRow = row;
+                    break;
+                }
+            }
+        }
+        
+        if (existingRow) {
+            // Update value (6th column)
+            const valueCell = existingRow.querySelector('td:nth-child(6)');
+            if (valueCell) {
+                valueCell.textContent = tvalue.value;
+                valueCell.classList.add('animate-fade-in');
+                setTimeout(() => valueCell.classList.remove('animate-fade-in'), 2000);
+            }
+            
+            // Update received (7th column)
+            const receivedCell = existingRow.querySelector('td:nth-child(7) small');
+            if (receivedCell) {
+                receivedCell.textContent = tvalue.received;
+            }
+        }
+    }
+    
+    toggleButton.addEventListener('click', function() {
+        isLiveEnabled = !isLiveEnabled;
+        localStorage.setItem('typeLiveUpdatesEnabled', isLiveEnabled);
+        isLiveEnabled ? connectSSE() : disconnectSSE();
+    });
+    
+    if (isLiveEnabled) connectSSE();
+    
+    window.addEventListener('beforeunload', function() {
+        if (eventSource) eventSource.close();
     });
 });
 </script>

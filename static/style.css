@@ -125,3 +125,18 @@ h2.accordion-header {
     cursor: default;
     opacity: 0.6;
 }
+
+/* ===== Live Updates Animations ===== */
+/* Animation for new messages in live update */
+@keyframes fadeIn {
+    from {
+        background-color: #fff3cd;
+    }
+    to {
+        background-color: transparent;
+    }
+}
+
+.animate-fade-in {
+    animation: fadeIn 2s ease-in-out;
+}

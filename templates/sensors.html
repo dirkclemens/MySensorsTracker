@@ -27,7 +27,14 @@
 {% block title %}Sensors{% endblock %}
 
 {% block header %}
-  <h1>MySensors <strong>Sensors</strong>{% if nid %} for Node {{ nid }} {% endif %}</h1>
+  <h1>MySensors <strong>Sensors</strong>{% if nid %} for Node {{ nid }} {% endif %}
+    <span class="ms-3">
+      <span id="liveStatus" class="badge bg-secondary">Disconnected</span>
+      <button id="toggleLive" class="btn btn-sm btn-outline-primary ms-2" title="Enable live updates">
+        <i class="bi bi-play-fill"></i> Live
+      </button>
+    </span>
+  </h1>
 {% endblock %}
 
 {% block content %}
@@ -46,7 +53,7 @@
    <th class="text-center">days</th>
   </tr>
   </thead>
-  <tbody>
+  <tbody id="sensorTableBody">
 {% for entry in object_list %}
 <tr>  
   <td class="text-center">
@@ -98,6 +105,131 @@ document.addEventListener('DOMContentLoaded', function() {
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     var tooltipList = tooltipTriggerList.map(function(tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // ========== Server-Sent Events (SSE) for Live Updates ==========
+    let eventSource = null;
+    let isLiveEnabled = localStorage.getItem('sensorLiveUpdatesEnabled') === 'true';
+    const maxDisplayedSensors = 500;
+    
+    const liveStatus = document.getElementById('liveStatus');
+    const toggleButton = document.getElementById('toggleLive');
+    const tableBody = document.getElementById('sensorTableBody');
+    
+    function updateStatus(status, text) {
+        liveStatus.className = `badge bg-${status}`;
+        liveStatus.textContent = text;
+    }
+    
+    function connectSSE() {
+        if (eventSource) {
+            eventSource.close();
+        }
+        
+        updateStatus('warning', 'Connecting...');
+        eventSource = new EventSource('{{ url_for("stream_sensors") }}');
+        
+        eventSource.onopen = function() {
+            updateStatus('success', 'Live');
+            toggleButton.innerHTML = '<i class="bi bi-pause-fill"></i> Live';
+            toggleButton.classList.remove('btn-outline-primary');
+            toggleButton.classList.add('btn-primary');
+        };
+        
+        eventSource.onmessage = function(event) {
+            try {
+                const sensor = JSON.parse(event.data);
+                updateSensorInTable(sensor);
+            } catch (e) {
+                console.error('Error parsing SSE message:', e);
+            }
+        };
+        
+        eventSource.onerror = function() {
+            updateStatus('danger', 'Error');
+            eventSource.close();
+            
+            if (isLiveEnabled) {
+                setTimeout(() => {
+                    if (isLiveEnabled) {
+                        connectSSE();
+                    }
+                }, 5000);
+            }
+        };
+    }
+    
+    function disconnectSSE() {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+        updateStatus('secondary', 'Disconnected');
+        toggleButton.innerHTML = '<i class="bi bi-play-fill"></i> Live';
+        toggleButton.classList.remove('btn-primary');
+        toggleButton.classList.add('btn-outline-primary');
+    }
+    
+    function updateSensorInTable(sensor) {
+        // Find existing row with matching usid or nid/cid
+        const rows = tableBody.querySelectorAll('tr');
+        let existingRow = null;
+        
+        for (let row of rows) {
+            // Try to match by nid and cid from dropdowns
+            const nidBtn = row.querySelector('td:nth-child(1) button');
+            const cidBtn = row.querySelector('td:nth-child(3) button');
+            if (nidBtn && cidBtn) {
+                const rowNid = parseInt(nidBtn.textContent.trim());
+                const rowCid = parseInt(cidBtn.textContent.trim());
+                if (rowNid === sensor.nid && rowCid === sensor.cid) {
+                    existingRow = row;
+                    break;
+                }
+            }
+        }
+        
+        if (existingRow) {
+            // Update lastseen column (7th column)
+            const lastseenCell = existingRow.querySelector('td:nth-child(7)');
+            if (lastseenCell) {
+                lastseenCell.textContent = sensor.lastseen;
+                lastseenCell.classList.add('animate-fade-in');
+                setTimeout(() => {
+                    lastseenCell.classList.remove('animate-fade-in');
+                }, 2000);
+            }
+            
+            // Update days column (8th column) - set to 0 for fresh update
+            const daysCell = existingRow.querySelector('td:nth-child(8)');
+            if (daysCell) {
+                daysCell.textContent = '0';
+            }
+        }
+    }
+    
+    // Toggle button handler
+    toggleButton.addEventListener('click', function() {
+        isLiveEnabled = !isLiveEnabled;
+        localStorage.setItem('sensorLiveUpdatesEnabled', isLiveEnabled);
+        
+        if (isLiveEnabled) {
+            connectSSE();
+        } else {
+            disconnectSSE();
+        }
+    });
+    
+    // Auto-start if enabled
+    if (isLiveEnabled) {
+        connectSSE();
+    }
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        if (eventSource) {
+            eventSource.close();
+        }
     });
 });
 </script>

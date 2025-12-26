@@ -27,7 +27,14 @@
 {% block title %}Nodes{% endblock %}
 
 {% block header %}
-  <h1>MySensors <strong>Nodes</strong></h1>
+  <h1>MySensors <strong>Nodes</strong>
+    <span class="ms-3">
+      <span id="liveStatus" class="badge bg-secondary">Disconnected</span>
+      <button id="toggleLive" class="btn btn-sm btn-outline-primary ms-2" title="Enable live updates">
+        <i class="bi bi-play-fill"></i> Live
+      </button>
+    </span>
+  </h1>
 {% endblock %}
 
 {% block content %}
@@ -51,7 +58,7 @@
    <th class="text-center"><a href="{{ url_for(request.endpoint,sort='nid') }}" class="text-white text-decoration-none">Node</a></th>
    <th>Sketch</th>
    <th>Location</th>
-   <th><a href="{{ url_for(request.endpoint,sort='date') }}" class="text-white text-decoration-none">Last seen</a></th>   
+   <th><a href="{{ url_for(request.endpoint,sort='date') }}" class="text-white text-decoration-none">Last seen</a></th>
    <th>Version</th>
    <th>Parent</th>
    <th class="text-center">API</th>
@@ -63,7 +70,7 @@
    <th><a href="{{ url_for(request.endpoint,sort='battery') }}" class="text-white text-decoration-none">Bat.chg</a></th>   
   </tr>
   </thead>
-  <tbody>
+  <tbody id="nodeTableBody">
 {% for entry in object_list %}
 <tr>
   <td class="text-center">
@@ -118,4 +125,146 @@
 </table>
 </div>
 {{ pagecontrols() }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // ========== Server-Sent Events (SSE) for Live Updates ==========
+    let eventSource = null;
+    let isLiveEnabled = localStorage.getItem('nodeLiveUpdatesEnabled') === 'true';
+    
+    const liveStatus = document.getElementById('liveStatus');
+    const toggleButton = document.getElementById('toggleLive');
+    const tableBody = document.getElementById('nodeTableBody');
+    
+    function updateStatus(status, text) {
+        liveStatus.className = `badge bg-${status}`;
+        liveStatus.textContent = text;
+    }
+    
+    function connectSSE() {
+        if (eventSource) return;
+        
+        updateStatus('warning', 'Connecting...');
+        eventSource = new EventSource('{{ url_for("stream_nodes") }}');
+        
+        eventSource.onopen = function() {
+            updateStatus('success', 'Live');
+        };
+        
+        eventSource.onerror = function() {
+            updateStatus('danger', 'Error');
+            disconnectSSE();
+            // Auto-reconnect after 5 seconds
+            setTimeout(() => {
+                if (isLiveEnabled) connectSSE();
+            }, 5000);
+        };
+        
+        eventSource.onmessage = function(event) {
+            try {
+                const nodeData = JSON.parse(event.data);
+                updateNodeInTable(nodeData);
+            } catch (e) {
+                console.error('Error parsing SSE data:', e);
+            }
+        };
+    }
+    
+    function disconnectSSE() {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+            updateStatus('secondary', 'Disconnected');
+        }
+    }
+    
+    function updateNodeInTable(nodeData) {
+        // Find the row for this node
+        const rows = tableBody.querySelectorAll('tr');
+        for (let row of rows) {
+            const nidCell = row.querySelector('td:first-child');
+            if (!nidCell) continue;
+            
+            const nidButton = nidCell.querySelector('button');
+            if (!nidButton) continue;
+            
+            const nid = parseInt(nidButton.textContent.trim());
+            if (nid !== nodeData.nid) continue;
+            
+            // Found the row - update relevant fields
+            const cells = row.querySelectorAll('td');
+            let updated = false;
+            
+            // Update Last seen (column 3, index 3)
+            if (nodeData.lastseen) {
+                const lastseenCell = cells[3];
+                if (lastseenCell) {
+                    // Convert format from 'dd.mm.yyyy HH:MM:SS' to 'dd.mm.yyyy HH:MM'
+                    const formattedDate = nodeData.lastseen.substring(0, 16);
+                    lastseenCell.textContent = formattedDate;
+                    lastseenCell.classList.remove('table-warning');
+                    lastseenCell.classList.add('animate-fade-in');
+                    updated = true;
+                }
+            }
+            
+            // Update Parent (column 5, index 5)
+            if (nodeData.parent !== undefined) {
+                const parentCell = cells[5];
+                if (parentCell) {
+                    parentCell.textContent = nodeData.parent;
+                    parentCell.classList.add('animate-fade-in');
+                    updated = true;
+                }
+            }
+            
+            // Update ARC (column 8, index 8)
+            if (nodeData.arc !== undefined) {
+                const arcCell = cells[8];
+                if (arcCell) {
+                    arcCell.textContent = nodeData.arc;
+                    arcCell.classList.add('animate-fade-in');
+                    updated = true;
+                }
+            }
+            
+            // Update Battery Level (column 11, index 11)
+            if (nodeData.bat_level !== undefined) {
+                const batCell = cells[11];
+                if (batCell) {
+                    batCell.textContent = nodeData.bat_level;
+                    batCell.classList.add('animate-fade-in');
+                    updated = true;
+                }
+            }
+            
+            // Highlight entire row briefly
+            if (updated) {
+                row.classList.add('table-info');
+                setTimeout(() => {
+                    row.classList.remove('table-info');
+                    // Remove fade-in from all cells
+                    cells.forEach(cell => cell.classList.remove('animate-fade-in'));
+                }, 2000);
+            }
+            
+            break;
+        }
+    }
+    
+    toggleButton.addEventListener('click', function() {
+        isLiveEnabled = !isLiveEnabled;
+        localStorage.setItem('nodeLiveUpdatesEnabled', isLiveEnabled);
+        isLiveEnabled ? connectSSE() : disconnectSSE();
+    });
+    
+    if (isLiveEnabled) connectSSE();
+    
+    window.addEventListener('beforeunload', function() {
+        if (eventSource) eventSource.close();
+    });
+});
+</script>
 {% endblock %}

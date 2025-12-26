@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  mysensors-tracker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mysensors-tracker
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    volumes:
+      # Persistente Datenbank
+      - ./data:/var/lib/mytracker
+      # Optional: Konfiguration überschreiben
+      - ./app.py:/app/app.py:ro
+      - ./mysensors.py:/app/mysensors.py:ro
+      - ./ota_firmware.py:/app/ota_firmware.py:ro
+      - ./templates:/app/templates:ro
+      - ./static:/app/static:ro
+    environment:
+      - TZ=Europe/Berlin
+      # Optional: Überschreibe Default-Werte
+      # - GATEWAY_HOST=192.168.2.211
+      # - GATEWAY_PORT=5003
+      # - WEB_PORT=5555
+      # - DATABASE_FILE=mysensors.db
+      # - DB_DIR=/var/lib/mytracker/
+    networks:
+      - mysensors-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+#networks:
+#  mysensors-network:
+#    driver: bridge
+
+volumes:
+  mysensors-data:

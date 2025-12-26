@@ -30,6 +30,12 @@
     {% if usid %} for Sensor {{ nid }}:{{ cid }} 
     {% elif nid %} for Node {{ nid }} 
     {% elif cid %} for Sensor type {{ cid }} {% endif %}
+    <span class="ms-3">
+      <span id="liveStatus" class="badge bg-secondary">Disconnected</span>
+      <button id="toggleLive" class="btn btn-sm btn-outline-primary ms-2" title="Enable live updates">
+        <i class="bi bi-play-fill"></i> Live
+      </button>
+    </span>
   </h1>
 {% endblock %}
 
@@ -113,6 +119,7 @@
   <thead class="table-dark">
   <tr>
    <th class="text-center"><a href="{{ url_for(request.endpoint,sort='nid') }}" class="text-white text-decoration-none">Node</a></th>
+   <th>Location</th>
    <th class="text-center"><a href="{{ url_for(request.endpoint,sort='cid') }}" class="text-white text-decoration-none">Sensor</a></th>
    <th class="text-center"><a href="{{ url_for(request.endpoint,sort='cmd') }}" class="text-white text-decoration-none">Cmd</a></th>
    <th>(symbol)</th>
@@ -122,7 +129,7 @@
    <th><a href="{{ url_for(request.endpoint,sort='date') }}" class="text-white text-decoration-none">Received</a></th>
   </tr>
   </thead>
-  <tbody>
+  <tbody id="messageTableBody">
   {% for entry in object_list %}
     <tr>
       <td class="text-center">
@@ -140,6 +147,7 @@
           </ul>
         </div>
       </td>
+      <td>{{ entry.nid.location or '-' }}</td>
       <td class="text-center">
         <div class="dropdown">
           <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">{{ entry.cid }}</button>
@@ -233,17 +241,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Save accordion state when changed
     formCollapse.addEventListener('shown.bs.collapse', function() {
         localStorage.setItem('messageFormOpen', 'true');
-        // Prevent auto-refresh while form is open
-        if (typeof formInteraction !== 'undefined') {
-            formInteraction = true;
-        }
     });
     
     formCollapse.addEventListener('hidden.bs.collapse', function() {
         localStorage.setItem('messageFormOpen', 'false');
-        if (typeof formInteraction !== 'undefined') {
-            formInteraction = false;
-        }
     });
     
     // Keep form open after submit
@@ -254,6 +255,142 @@ document.addEventListener('DOMContentLoaded', function() {
             localStorage.setItem('messageFormOpen', 'true');
         });
     }
+    
+    // ========== Server-Sent Events (SSE) for Live Updates ==========
+    let eventSource = null;
+    let isLiveEnabled = localStorage.getItem('liveUpdatesEnabled') === 'true';
+    let maxDisplayedMessages = 500; // Limit displayed messages for performance
+    
+    const liveStatus = document.getElementById('liveStatus');
+    const toggleButton = document.getElementById('toggleLive');
+    const tableBody = document.getElementById('messageTableBody');
+    
+    function updateStatus(status, text) {
+        liveStatus.className = `badge bg-${status}`;
+        liveStatus.textContent = text;
+    }
+    
+    function connectSSE() {
+        if (eventSource) {
+            eventSource.close();
+        }
+        
+        updateStatus('warning', 'Connecting...');
+        eventSource = new EventSource('{{ url_for("stream_messages") }}');
+        
+        eventSource.onopen = function() {
+            updateStatus('success', 'Live');
+            toggleButton.innerHTML = '<i class="bi bi-pause-fill"></i> Live';
+            toggleButton.classList.remove('btn-outline-primary');
+            toggleButton.classList.add('btn-primary');
+        };
+        
+        eventSource.onmessage = function(event) {
+            try {
+                const msg = JSON.parse(event.data);
+                addMessageToTable(msg);
+            } catch (e) {
+                console.error('Error parsing SSE message:', e);
+            }
+        };
+        
+        eventSource.onerror = function() {
+            updateStatus('danger', 'Error');
+            eventSource.close();
+            
+            // Auto-reconnect after 5 seconds if still enabled
+            if (isLiveEnabled) {
+                setTimeout(() => {
+                    if (isLiveEnabled) {
+                        connectSSE();
+                    }
+                }, 5000);
+            }
+        };
+    }
+    
+    function disconnectSSE() {
+        if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+        updateStatus('secondary', 'Disconnected');
+        toggleButton.innerHTML = '<i class="bi bi-play-fill"></i> Live';
+        toggleButton.classList.remove('btn-primary');
+        toggleButton.classList.add('btn-outline-primary');
+    }
+    
+    function addMessageToTable(msg) {
+        // Create new row
+        const row = document.createElement('tr');
+        row.className = 'table-warning animate-fade-in';
+        
+        // Build row HTML
+        row.innerHTML = `
+            <td class="text-center">
+              <div class="dropdown">
+                <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">${msg.nid}</button>
+                <ul class="dropdown-menu">
+                  <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}?nid=${msg.nid}">Show only this node</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all nodes</a></li>
+                </ul>
+              </div>
+            </td>
+            <td>${msg.location ? msg.location : '-'}</td>
+            <td class="text-center">
+                <div class="dropdown">
+                    <button class="btn btn-link btn-sm dropdown-toggle p-0" type="button" data-bs-toggle="dropdown">${msg.cid}</button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}?cid=${msg.cid}">Show only this sensor type</a></li>
+                        <li><a class="dropdown-item" href="{{ url_for(request.endpoint) }}">Show all</a></li>
+                    </ul>
+                </div>
+            </td>
+            <td class="text-center">${msg.cmd}</td>
+            <td><code>${msg.cmd_name || '?'}</code></td>
+            <td class="text-center">${msg.typ}</td>
+            <td><code>${msg.type_name || '?'}</code></td>
+            <td>${msg.payload || ''}</td>
+            <td><small>${msg.received}</small></td>
+        `;
+        
+        // Insert at top of table
+        tableBody.insertBefore(row, tableBody.firstChild);
+        
+        // Remove highlight after animation
+        setTimeout(() => {
+            row.classList.remove('table-warning', 'animate-fade-in');
+        }, 2000);
+        
+        // Limit number of displayed rows for performance
+        while (tableBody.children.length > maxDisplayedMessages) {
+            tableBody.removeChild(tableBody.lastChild);
+        }
+    }
+    
+    // Toggle button handler
+    toggleButton.addEventListener('click', function() {
+        isLiveEnabled = !isLiveEnabled;
+        localStorage.setItem('liveUpdatesEnabled', isLiveEnabled);
+        
+        if (isLiveEnabled) {
+            connectSSE();
+        } else {
+            disconnectSSE();
+        }
+    });
+    
+    // Auto-start if enabled
+    if (isLiveEnabled) {
+        connectSSE();
+    }
+    
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', function() {
+        if (eventSource) {
+            eventSource.close();
+        }
+    });
 });
 </script>
 {% endblock %}
