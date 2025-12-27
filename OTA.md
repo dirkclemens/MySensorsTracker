@@ -156,7 +156,14 @@ void loop() {
 
 ## OTA Update durchführen
 
-### Schritt 1: Firmware hochladen
+### im CI/CD Prozess per REST Service
+
+```
+curl -X POST http://localhost:5555/api/ota -F "node_id=3" -F "fw_type=33" -F "fw_ver=1" -F "hex_file=@/path/to/firmware.hex"
+```
+
+
+### in der WebUI: Schritt 1: Firmware hochladen
 
 1. Öffnen Sie die Web-UI: `http://<server-ip>:5555`
 2. Klicken Sie in der Navigation auf **"OTA"**

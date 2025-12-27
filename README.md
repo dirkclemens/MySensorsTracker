@@ -1,8 +1,10 @@
 
 # Ergänzungen 2025 Dirk Clemens
 - OTA Firmware Management
+    - u.a. per REST API für CI/CD
 - Datenbank Bereinigung nach Aufbewahrungszeitraum
 - Bootstrapped Web UI
+- dynamische Aktualisierungen der UI (Javascript)
 - Diverse Verbesserungen
 
 

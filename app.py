@@ -686,6 +686,10 @@ def on_internal_message( nid, cid, typ, val ):
         node.sk_name = val 
         applog.debug("sk_name='%s'", val)
         node.save()
+        # OTA: Nach Präsentation Node aus started_nodes entfernen
+        if ota_manager and nid in ota_manager.started_nodes:
+            applog.info(f"OTA: Node {nid} hat sich neu präsentiert, entferne aus started_nodes.")
+            ota_manager.started_nodes.pop(nid, None)
     #  my/2/stat/123/255/3/0/12 $ Rev: 826 $ 11:34:24
     #  or
     #  my/2/stat/199/255/3/0/12 586
@@ -702,6 +706,10 @@ def on_internal_message( nid, cid, typ, val ):
         node.sk_revision = rev
         applog.debug("revision=%d", rev)
         node.save()
+        # OTA: Nach Präsentation Node aus started_nodes entfernen
+        if ota_manager and nid in ota_manager.started_nodes:
+            applog.info(f"OTA: Node {nid} hat neue Sketch-Version gemeldet, entferne aus started_nodes.")
+            ota_manager.started_nodes.pop(nid, None)
     elif (cid==255 and typ==mysensors.Internal.I_BATTERY_LEVEL):
         on_node_value_message( nid, int(mysensors.Values.V_PERCENTAGE), val)
         # Push battery update to SSE queue
@@ -1089,6 +1097,7 @@ def ota_index():
                           nodes=nodes,
                           node_status=node_status)
 
+##----------------------------------------------------------------------------
 
 @app.route('/ota/upload', methods=['POST'])
 def ota_upload():
@@ -1162,6 +1171,7 @@ def ota_upload():
     
     return redirect('/ota')
 
+##----------------------------------------------------------------------------
 
 @app.route('/ota/delete/<int:fw_type>/<int:fw_ver>', methods=['POST'])
 def ota_delete(fw_type, fw_ver):
@@ -1183,6 +1193,90 @@ def ota_delete(fw_type, fw_ver):
     
     return redirect('/ota')
 
+##----------------------------------------------------------------------------
+
+@app.route('/ota/update/<int:nid>', methods=['POST'])
+def ota_update_node(nid):
+    """Request firmware update for a specific node."""
+    global ota_manager
+    
+    if not ota_manager:
+        flask.flash("OTA Manager not initialized", "error")
+        return redirect('/ota')
+    
+    try:
+        fw_type = int(request.form.get('fw_type'))
+        fw_ver = int(request.form.get('fw_ver'))
+        
+        if ota_manager.request_update(nid, fw_type, fw_ver):
+            flask.flash(f"Node {nid} scheduled for firmware type {fw_type} version {fw_ver}", "success")
+        else:
+            flask.flash(f"Failed to schedule node {nid} for update", "error")
+            
+    except Exception as e:
+        flask.flash(f"Error scheduling update: {str(e)}", "error")
+    
+    return redirect('/ota')    
+
+##----------------------------------------------------------------------------
+
+# OTA-Update per REST-API (z.B. für CI/CD)
+@app.route('/api/ota', methods=['POST'])
+def ota_api_update():
+    """OTA-Update für einen Node per REST-API starten (z.B. für CI/CD)."""
+    global ota_manager
+    from werkzeug.utils import secure_filename
+    import tempfile
+
+    if not ota_manager:
+        return jsonify({"status": "error", "message": "OTA Manager not initialized"}), 500
+
+    try:
+        # Parameter aus dem Request holen
+        node_id = request.form.get('node_id') or request.form.get('nid')
+        fw_type = request.form.get('fw_type')
+        fw_ver = request.form.get('fw_ver')
+        fw_file = request.files.get('hex_file')
+
+        # Alternativ: JSON-Body akzeptieren
+        if request.is_json:
+            data = request.get_json()
+            node_id = data.get('node_id') or data.get('nid') or node_id
+            fw_type = data.get('fw_type') or fw_type
+            fw_ver = data.get('fw_ver') or fw_ver
+            # hex_file kann nur als Multipart-Form kommen
+
+        # Validierung
+        if not (node_id and fw_type and fw_ver and fw_file):
+            return jsonify({"status": "error", "message": "Missing required parameters (node_id, fw_type, fw_ver, hex_file)"}), 400
+
+        node_id = int(node_id)
+        fw_type = int(fw_type)
+        fw_ver = int(fw_ver)
+
+        # Temporäre Datei speichern
+        filename = secure_filename(fw_file.filename)
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.hex', delete=False) as tmp:
+            fw_file.save(tmp.name)
+            tmp_path = tmp.name
+
+        # Firmware ins OTA-Manager laden
+        if ota_manager.load_firmware(fw_type, fw_ver, tmp_path):
+            # Update für Node anfordern
+            if ota_manager.request_update(node_id, fw_type, fw_ver):
+                os.unlink(tmp_path)
+                return jsonify({"status": "success", "message": f"Node {node_id} scheduled for firmware type {fw_type} version {fw_ver}"}), 200
+            else:
+                os.unlink(tmp_path)
+                return jsonify({"status": "error", "message": f"Failed to schedule node {node_id} for update"}), 500
+        else:
+            os.unlink(tmp_path)
+            return jsonify({"status": "error", "message": "Failed to load firmware"}), 500
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Exception: {str(e)}"}), 500
+
+##----------------------------------------------------------------------------
 
 @app.route('/stats')
 def stats():
@@ -1237,6 +1331,7 @@ def stats():
     
     return render_template('stats.html', stats=stats)
 
+##----------------------------------------------------------------------------
 
 @app.route('/stats/cleanup', methods=['POST'])
 def stats_cleanup():
@@ -1249,6 +1344,7 @@ def stats_cleanup():
     
     return redirect(url_for('stats'))
 
+##----------------------------------------------------------------------------
 
 @app.route('/nodes/discover', methods=['POST'])
 def nodes_discover():
@@ -1267,6 +1363,7 @@ def nodes_discover():
     
     return redirect(request.referrer or url_for('nodes'))
 
+##----------------------------------------------------------------------------
 
 @app.route('/nodes/discover-request', methods=['POST'])
 def nodes_discover_request():
@@ -1285,6 +1382,7 @@ def nodes_discover_request():
     
     return redirect(request.referrer or url_for('nodes'))
 
+##----------------------------------------------------------------------------
 
 @app.route('/nodes/<int:nid>/presentation', methods=['POST'])
 def node_presentation(nid):
@@ -1303,6 +1401,7 @@ def node_presentation(nid):
     
     return redirect(request.referrer or url_for('nodes'))
 
+##----------------------------------------------------------------------------
 
 @app.route('/nodes/<int:nid>/discover', methods=['POST'])
 def node_discover(nid):
@@ -1321,30 +1420,7 @@ def node_discover(nid):
     
     return redirect(request.referrer or url_for('nodes'))
 
-
-@app.route('/ota/update/<int:nid>', methods=['POST'])
-def ota_update_node(nid):
-    """Request firmware update for a specific node."""
-    global ota_manager
-    
-    if not ota_manager:
-        flask.flash("OTA Manager not initialized", "error")
-        return redirect('/ota')
-    
-    try:
-        fw_type = int(request.form.get('fw_type'))
-        fw_ver = int(request.form.get('fw_ver'))
-        
-        if ota_manager.request_update(nid, fw_type, fw_ver):
-            flask.flash(f"Node {nid} scheduled for firmware type {fw_type} version {fw_ver}", "success")
-        else:
-            flask.flash(f"Failed to schedule node {nid} for update", "error")
-            
-    except Exception as e:
-        flask.flash(f"Error scheduling update: {str(e)}", "error")
-    
-    return redirect('/ota')
-
+##----------------------------------------------------------------------------
 
 @app.route('/nodes/<int:nid>/reboot', methods=['POST'])
 def reboot_node(nid):

@@ -192,7 +192,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         tableBody.insertBefore(row, tableBody.firstChild);
         
-        setTimeout(() => row.classList.remove('animate-fade-in'), 2000);
+        setTimeout(() => row.classList.remove('animate-fade-in'), 3000);
         
         while (tableBody.children.length > maxDisplayedValues) {
             tableBody.removeChild(tableBody.lastChild);
