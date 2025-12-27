@@ -35,15 +35,15 @@
     <table class="table table-hover" style="width:60%;">
         <thead class="table-dark">
         <tr>
-            <th class="text-center">Node</th>
-            <th>Sketch</th>
+            <th class="text-left">Node</th>
+            <th style="width:60%;">Sketch</th>
             <th>Location</th>
         </tr>
         </thead>
         <tbody>
     {% for entry in form.locs %}
         <tr>
-            <td class="text-center">{{ entry.nid }}</td>
+            <td class="text-left">{{ entry.nid }}</td>
             {{ td_or_none(entry.sketch) }}
             {{ td_or_none(entry.location) }}
         </tr>
