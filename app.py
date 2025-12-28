@@ -51,7 +51,7 @@ from playhouse.flask_utils import object_list
 from playhouse.migrate import *
 from playhouse.reflection import Introspector
 import wtforms as wtf                   # BSD license
-
+import atexit
 import mysensors
 import ota_firmware
 
@@ -1346,6 +1346,31 @@ def stats_cleanup():
 
 ##----------------------------------------------------------------------------
 
+# Manuelles Reconnect des Gateways
+@app.route('/gateway/reconnect', methods=['POST'])
+def gateway_reconnect():
+    """Manuelles Neuverbinden mit dem MySensors Gateway."""
+    global gateway_socket, gateway_running, applog
+    try:
+        # Verbindung schließen, falls offen
+        if gateway_socket:
+            try:
+                gateway_socket.close()
+            except Exception:
+                pass
+            gateway_socket = None
+        applog.info("Manuelles Reconnect: Gateway-Verbindung wird neu aufgebaut ...")
+        # Der Listener-Thread versucht automatisch neu zu verbinden
+        # Optional: Status-Flag setzen, damit der Thread sofort reagiert
+        # (Hier reicht das Schließen des Sockets, der Thread erkennt das und verbindet neu)
+        flask.flash("Gateway-Verbindung wird neu aufgebaut ...", "info")
+    except Exception as e:
+        applog.error(f"Fehler beim manuellen Reconnect: {e}")
+        flask.flash(f"Fehler beim Neuverbinden: {str(e)}", "danger")
+    return redirect(url_for('stats'))
+
+##----------------------------------------------------------------------------
+ 
 @app.route('/nodes/discover', methods=['POST'])
 def nodes_discover():
     """Send I_PRESENTATION request to all nodes to refresh presentation data."""
@@ -2008,7 +2033,7 @@ def handle_stream_message(node_id, child_id, stream_type, payload):
 #endregion
 #############################################################################
 
-def gateway_listener():
+def gateway_listener_alt():
     """Thread function to listen to MySensors Gateway"""
     global gateway_socket, gateway_running, applog
     
@@ -2057,6 +2082,124 @@ def gateway_listener():
             gateway_socket.close()
         except:
             pass
+
+
+def gateway_listener():
+    """Thread function to listen to MySensors Gateway with robust reconnection"""
+    global gateway_socket, gateway_running, applog
+    
+    buffer = ""
+    reconnect_delay = 5  # Initial reconnect delay
+    max_reconnect_delay = 60  # Maximum delay between reconnects
+    last_data_time = None
+    heartbeat_timeout = 30  # Seconds without data before considering connection dead
+    
+    while gateway_running:
+        try:
+            # Connection establishment
+            if gateway_socket is None:
+                applog.info("Connecting to MySensors Gateway at %s:%d (delay: %ds)", 
+                           GATEWAY_HOST, GATEWAY_PORT, reconnect_delay)
+                
+                try:
+                    gateway_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    
+                    # Enable TCP keepalive for better connection monitoring
+                    gateway_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                    
+                    # Platform-specific keepalive settings (Linux)
+                    try:
+                        gateway_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10)
+                        gateway_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+                        gateway_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+                    except (OSError, AttributeError):
+                        # Not supported on all platforms (e.g., Windows)
+                        applog.debug("TCP keepalive settings not available on this platform")
+                    
+                    gateway_socket.settimeout(10.0)  # Longer timeout for recv
+                    gateway_socket.connect((GATEWAY_HOST, GATEWAY_PORT))
+                    
+                    applog.info("Successfully connected to MySensors Gateway")
+                    reconnect_delay = 5  # Reset delay on successful connection
+                    last_data_time = datetime.now()
+                    buffer = ""  # Reset buffer on new connection
+                    
+                except (socket.error, socket.timeout) as e:
+                    applog.error("Failed to connect to gateway: %s", str(e))
+                    if gateway_socket:
+                        try:
+                            gateway_socket.close()
+                        except:
+                            pass
+                        gateway_socket = None
+                    
+                    # Exponential backoff
+                    time.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                    continue
+            
+            # Check for heartbeat timeout (no data received for too long)
+            if last_data_time and (datetime.now() - last_data_time).total_seconds() > heartbeat_timeout:
+                applog.warning("No data received for %d seconds, considering connection dead", heartbeat_timeout)
+                raise ConnectionError("Heartbeat timeout")
+            
+            # Read data from gateway
+            try:
+                data = gateway_socket.recv(1024)
+            except socket.timeout:
+                # Timeout is normal, just check heartbeat and continue
+                continue
+            
+            if not data:
+                # Empty data means connection closed by remote
+                applog.warning("Gateway connection closed by remote host")
+                raise ConnectionError("Connection closed by gateway")
+            
+            # Update last data timestamp
+            last_data_time = datetime.now()
+            
+            # Process received data line by line
+            buffer += data.decode('utf-8', errors='ignore')
+            while '\n' in buffer:
+                line, buffer = buffer.split('\n', 1)
+                line = line.strip()
+                if line:  # Only process non-empty lines
+                    try:
+                        process_gateway_message(line)
+                    except Exception as e:
+                        applog.error("Error processing message '%s': %s", line, str(e))
+        
+        except (socket.error, OSError, ConnectionError) as e:
+            applog.error("Gateway connection error: %s", str(e))
+            
+            # Clean up socket
+            if gateway_socket:
+                try:
+                    gateway_socket.close()
+                except:
+                    pass
+                gateway_socket = None
+            
+            # Wait before reconnecting with exponential backoff
+            applog.info("Waiting %d seconds before reconnecting...", reconnect_delay)
+            time.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+            
+        except Exception as e:
+            applog.error("Unexpected error in gateway listener: %s", str(e), exc_info=True)
+            if gateway_socket:
+                try:
+                    gateway_socket.close()
+                except:
+                    pass
+                gateway_socket = None
+            time.sleep(reconnect_delay)
+
+# Automatisches Cleanup registrieren
+def cleanup_gateway():
+    global gateway_running
+    gateway_running = False
+    applog.info("Gateway cleanup initiated")
 
 
 def main():
@@ -2117,12 +2260,15 @@ def main():
             applog.error("Error loading firmware type %d version %d: %s", fw.fw_type, fw.fw_ver, str(e))
 
     # Start MySensors Gateway listener thread
-    global gateway_running
+    global gateway_running, gateway_thread
     gateway_running = True
     gateway_thread = threading.Thread(target=gateway_listener, daemon=True)
     gateway_thread.start()
     applog.info("Listening to MySensors Gateway at %s:%d", GATEWAY_HOST, GATEWAY_PORT)
 
+    # Cleanup-Handler registrieren
+    atexit.register(cleanup_gateway)
+    
     # Start cleanup scheduler
     def run_scheduler():
         while gateway_running:

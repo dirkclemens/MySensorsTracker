@@ -12,7 +12,13 @@
 {% block title %}Database Statistics{% endblock %}
 
 {% block header %}
-<h1>MySensors <i class="bi bi-bar-chart"></i> <strong>Database Statistics</strong></h1>
+<h1>MySensors <i class="bi bi-bar-chart"></i> <strong>Database Statistics</strong>
+  <form method="POST" action="{{ url_for('gateway_reconnect') }}" class="d-inline ms-3 float-end d-flex align-items-center">
+    <button type="submit" class="btn btn-sm btn-outline-warning ms-2" title="Gateway Verbindung neu aufbauen">
+      <i class="bi bi-arrow-repeat"></i> Neu Verbinden
+    </button>
+  </form>
+</h1>
 {% endblock %}
 
 {% block content %}

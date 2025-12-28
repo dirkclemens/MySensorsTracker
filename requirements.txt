@@ -4,3 +4,4 @@ wtforms
 schedule
 intelhex
 crcmod
+atexit
