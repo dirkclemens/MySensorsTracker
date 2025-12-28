@@ -814,6 +814,11 @@ def process_gateway_message(line):
         val = parts[5] if len(parts) > 5 else ""
         
         applog.debug("message nid:%d cid:%d cmd:%d typ:%d = '%s'", nid, cid, cmd, typ, val)
+
+        # Ignore gateway version messages 
+        if nid == 0 and cid == 255 and cmd == mysensors.Commands.C_INTERNAL and typ == mysensors.Internal.I_VERSION:
+            return    
+        
         add_message(nid, cid, cmd, typ, val)
         
         # Push message to SSE queue for live updates
@@ -2194,6 +2199,7 @@ def gateway_listener():
                     pass
                 gateway_socket = None
             time.sleep(reconnect_delay)
+
 
 # Automatisches Cleanup registrieren
 def cleanup_gateway():
